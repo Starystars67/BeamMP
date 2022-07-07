@@ -212,7 +212,7 @@ end
 
 
 
-local function startcleanUpSessionMods()
+local function startCleanUpSessionMods()
 	requestCleanup = true
 end
 
@@ -239,7 +239,7 @@ M.onModStateChanged = onModStateChanged
 M.backupLoadedMods = backupLoadedMods
 M.restoreLoadedMods = restoreLoadedMods
 M.cleanUpSessionMods = cleanUpSessionMods
-M.startcleanUpSessionMods = startcleanUpSessionMods
+M.startCleanUpSessionMods = startCleanUpSessionMods
 M.showServerMods = showServerMods
 M.setServerMods = setServerMods
 M.checkAllMods = checkAllMods

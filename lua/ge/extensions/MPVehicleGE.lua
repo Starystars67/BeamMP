@@ -1388,8 +1388,10 @@ local function onPreRender(dt)
 
 					for spectatorID, _ in pairs(v.spectators) do
 						local spectator = players[spectatorID]
-						if not (spectator == owner or spectator.isLocal) then
-							spectators = spectators .. spectator.name .. ', '
+						if spectator then
+							if not (spectator == owner or spectator.isLocal) then
+								spectators = spectators .. spectator.name .. ', '
+							end
 						end
 					end
 

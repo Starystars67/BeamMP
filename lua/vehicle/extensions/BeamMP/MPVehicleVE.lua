@@ -37,7 +37,7 @@ function addKeyEventListener(keyname, f, t)
 		end
 	else
 		f = f or function() end
-		log('W','AddKeyEventListener', "Adding a key event listener for key '"..keyname.."'")
+		log('W','AddKeyEventListener', "Adding a key event listener for key '"..tostring(keyname).."'")
 	
 		table.insert(keypressTriggers, {key = keyname, func = f, type = t or 'both'})
 		keysToPoll[keyname] = true

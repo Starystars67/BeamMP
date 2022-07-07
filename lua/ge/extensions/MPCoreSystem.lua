@@ -150,10 +150,10 @@ M.leaveServer = function(goBack)
 		M.connectToLauncher()
 		print("Reconnected to Launcher")
 		-- resets the instability function back to default
-		onInstabilityDetected = function (jbeamFilename)  bullettime.pause(true)  log('E', "", "Instability detected for vehicle " .. tostring(jbeamFilename))  ui_message({txt="vehicle.main.instability", context={vehicle=tostring(jbeamFilename)}}, 10, 'instability', "warning")end
+		onInstabilityDetected = function (jbeamFilename) bullettime.pause(true)  log('E', "", "Instability detected for vehicle " .. tostring(jbeamFilename)) ui_message({txt="vehicle.main.instability", context={vehicle=tostring(jbeamFilename)}}, 10, 'instability', "warning")end
 
 		--cleanUpSessionMods = true
-	  MPModManager.cleanUpSessionMods()
+	  MPModManager.startCleanUpSessionMods()
 	end
 end
 
@@ -304,6 +304,7 @@ local function sessionData(data)
 		UI.setPlayerCount(playerCount)
 		UI.updatePlayersList(playerList)
 	elseif code == "n" then
+		core_gamestate.setGameState('multiplayer', 'multiplayer', 'multiplayer') -- This is added to set the UI elements
 		UI.setNickname(data)
 		MPConfig.setNickname(data)
 	end
