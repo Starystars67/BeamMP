@@ -52,6 +52,11 @@ local function applyPos(data, serverVehicleID)
 
 	local decoded = jsonDecode(data)
 
+	if not decoded then
+		log('E', 'applyPos', 'decoded data is invalid for '..serverVehicleID)
+		dump(decoded)
+	end
+
 	local simspeedFraction = 1/bullettime.getReal()
 
 	for k,v in pairs(decoded.vel) do decoded.vel[k] = v*simspeedFraction end
