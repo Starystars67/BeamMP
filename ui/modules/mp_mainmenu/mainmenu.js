@@ -368,7 +368,7 @@ angular.module('beamng.stuff')
     },
     {
       translateid: 'ui.playmodes.multiplayer',
-      icon: '/ui/modules/mainmenu/drive/icons/account-multiple.svg',
+      icon: '/ui/modules/mp_mainmenu/drive/icons/account-multiple.svg',
       targetState: 'menu.multiplayer.tos'
     },
     {

@@ -18,14 +18,8 @@ registerCoreModule("MPCoreSystem")
 load("MPModManager")
 registerCoreModule("MPModManager")
 
---load("MPCoreNetwork")
---registerCoreModule("MPCoreNetwork")
-
 load("MPConfig")
 registerCoreModule("MPConfig")
-
---load("MPGameNetwork")
---registerCoreModule("MPGameNetwork")
 
 load("MPVehicleGE")
 registerCoreModule("MPVehicleGE")

@@ -513,8 +513,8 @@ function handleCoreMsg(msg)
 			log('W','handleCoreMsg','Received: '..code..' -> '..data)
 		end
 	end
-	HandleCoreNetwork[code](data)
 	checkLauncherConnection()
+	HandleCoreNetwork[code](data)
 	if MPDebug then MPDebug.packetReceived(string.len(msg)) end
 end
 
@@ -544,8 +544,8 @@ function handleGameMsg(msg)
 	if settings.getValue("showDebugOutput") then 
 		log('W','handleGameMsg','Received: '..code..' -> '..data)
 	end
-	HandleGameNetwork[code](data)
 	checkLauncherConnection()
+	HandleGameNetwork[code](data)
 	if MPDebug then MPDebug.packetReceived(string.len(msg)) end
 end
 
@@ -641,7 +641,7 @@ end
 
 M.onUpdate = function(dt)
 	if MP then
-		while (true) do
+		--while (true) do
 			local msg = MP:try_pop()
 			if msg then
 				local code = string.sub(msg, 1, 1)
@@ -652,9 +652,9 @@ M.onUpdate = function(dt)
 						handleGameMsg(data)
 				end    
 			else
-				break
+				--break
 			end
-		end
+		--end
 	end
 
 	if cleanUpSessionMods then
