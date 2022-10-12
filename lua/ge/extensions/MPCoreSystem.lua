@@ -57,7 +57,9 @@ M.send = function(p, s)
 
 	--local r = TCPLauncherSocket:send(string.len(s)..'>'..s)
 	if not settings.getValue("showDebugOutput") then return end
-  log('M', 'send', 'Sending Data ('..r..'-'..p..'): '..s)
+	if string.sub(s, 1, 1) == 'U' then
+  	log('M', 'send', 'Sending Data ('..r..'-'..p..'): '..s)
+	end
 end
 
 --====================================================== DATA SENDING ======================================================
@@ -679,12 +681,13 @@ M.onUpdate = function(dt)
 		--================================ SECONDS TIMER ================================
 		launcherConnectionTimer = launcherConnectionTimer + dt -- Time in seconds
 		--print(launcherConnectionTimer)
-		if launcherConnectionTimer > 1 then
+		if launcherConnectionTimer > 0.5 then
 			M.send('CORE', 'U') -- Server heartbeat - New and improved to get ping AND ui message ANDDDD The launcher heartbeat!!!!
 		end
 
-		-- Check the launcher connection
-		if launcherConnectionTimer > 2 then
+		-- Check the launcher connection 
+		-- This code is no longer required with IPC Connection?
+		--[[if launcherConnectionTimer > 2 then 
 			log('M', 'onUpdate', "it's been >2 seconds since the last ping so lua was probably frozen for a while")
 
 			if not connectionIssuesShown then
@@ -699,10 +702,9 @@ M.onUpdate = function(dt)
 
 			if launcherConnectionTimer > 15 then
 				M.disconnectLauncher(true) -- reconnect to launcher (this breaks the launcher if the connection
-				-- TODO #202 Reconnect this back to the active session in case of network loss.
-				--connectToServer(currentServer.ip, currentServer.port, currentServer.modsString, currentServer.name)
+				M.connectToServer(currentServer.ip, currentServer.port, currentServer.modsString, currentServer.name)
 			end
-		end
+		end]]
 	end
 end
 
