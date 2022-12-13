@@ -25,7 +25,6 @@ local loggedIn = false
 local currentModHasLoaded = false
 local isMpSession = false
 local isGoingMpSession = false
-local launcherTimeout = 0
 local connectionIssuesShown = false
 --[[
 Z  -> The client asks the launcher its version
@@ -681,7 +680,7 @@ M.onUpdate = function(dt)
 		--================================ SECONDS TIMER ================================
 		launcherConnectionTimer = launcherConnectionTimer + dt -- Time in seconds
 		--print(launcherConnectionTimer)
-		if launcherConnectionTimer > 0.5 then
+		if launcherConnectionTimer > 1 then
 			M.send('CORE', 'U') -- Server heartbeat - New and improved to get ping AND ui message ANDDDD The launcher heartbeat!!!!
 		end
 
