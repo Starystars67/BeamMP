@@ -49,7 +49,7 @@ local function makeWrapper(i, fn)
 	return function(...)
 		depth = depth + 1
 		calls[i] = calls[i] + 1
-		childTime[depth] = 0
+		childTime[depth], childBytes[depth] = 0, 0 -- both, a garbage wrapper can end up nested inside this one right after toggling
 		startAt[depth] = clockhp()
 		return leave(fn(...))
 	end
@@ -163,6 +163,7 @@ end
 
 local function updateGFX()
 	if depth ~= 0 then resetStack() end -- a wrapped call errored and never returned
+	if #moduleNames == 0 then return end -- not started by GE yet
 	frames = frames + 1
 
 	local now = clockhp() -- wall clock, dtSim is 0 while paused
@@ -184,6 +185,16 @@ local function updateGFX()
 	resetCounters()
 end
 
+-- the game reloads a vehicle's extensions itself when the vehicle is reloaded (e.g. a config edit), keep our settings
+-- so we carry on straight away instead of sitting there unstarted until GE sends start() again
+local function onSerialize()
+	return { names = moduleNames, garbage = trackGarbage }
+end
+
+local function onExtensionLoaded(data)
+	if type(data) == "table" and type(data.names) == "table" and #data.names > 0 then start(data.names, data.garbage) end
+end
+
 local function onExtensionUnloaded()
 	unwrap()
 end
@@ -192,6 +203,8 @@ end
 M.start               = start
 M.setTrackGarbage     = setTrackGarbage
 M.updateGFX           = updateGFX
+M.onSerialize         = onSerialize
+M.onExtensionLoaded   = onExtensionLoaded
 M.onExtensionUnloaded = onExtensionUnloaded
 
 return M

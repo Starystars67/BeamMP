@@ -209,7 +209,7 @@ local function makeWrapper(i, fn)
 		depth = depth + 1
 		frameCalls = frameCalls + 1
 		frameCallsPer[i] = frameCallsPer[i] + 1
-		childTime[depth] = 0
+		childTime[depth], childBytes[depth] = 0, 0 -- both, a garbage wrapper can end up nested inside this one right after toggling
 		startAt[depth] = clock:stop()
 		return leave(fn(...))
 	end
@@ -371,7 +371,7 @@ end
 -- @tparam number frames VE frames the report covers
 -- @tparam table values flat { ms, calls, KB } per VE module, same order as veModules
 local function veReport(gameVehicleID, frames, values)
-	if not active then return end
+	if not active or type(values) ~= "table" or #values < #veModules * 3 then return end -- not started yet (e.g. just reloaded) or from an older version
 	local v = veVehicles[gameVehicleID]
 	if not v then
 		v = {}
@@ -797,8 +797,11 @@ local function drawNetworkSection()
 	im.Columns(1)
 end
 
+local windowBegun = false -- so a failed frame can still close the imgui window it opened
+
 local function drawWindow()
 	im.SetNextWindowSize(im.ImVec2(640, 760), im.Cond_FirstUseEver)
+	windowBegun = true
 	if im.Begin("BeamMP Performance##MPPerformanceGraph", windowOpen) then
 		im.Checkbox("Pause", paused)
 		im.SameLine()
@@ -831,6 +834,7 @@ local function drawWindow()
 		drawNetworkSection()
 	end
 	im.End()
+	windowBegun = false
 	if not windowOpen[0] then M.hide() end
 end
 
@@ -870,9 +874,7 @@ local function toggle()
 	if active then hide() else show() end
 end
 
-local function onUpdate(dtReal)
-	if not active then return end
-
+local function update(dtReal)
 	if not paused[0] then commitFrame(dtReal) end
 	resetFrame()
 
@@ -900,6 +902,22 @@ local function onUpdate(dtReal)
 	drawWindow()
 end
 
+local function onUpdate(dtReal)
+	if not active then return end
+	-- a bug in the window must never break the extensions hooked after us, so if it errors we log it and close
+	local ok, err = xpcall(update, debug.traceback, dtReal)
+	if not ok then
+		if windowBegun then im.End() windowBegun = false end
+		log('E', 'MPPerformanceGraph', "Performance window error, closing it: " .. tostring(err))
+		hide()
+	end
+end
+
+-- hooks only run between wrapped calls, so a non zero depth here means a wrapped call errored and never returned
+local function onPreRender()
+	if active and (depth ~= 0 or gcStopped) then resetStack() end
+end
+
 local function onVehicleSpawned(gameVehicleID)
 	if not active then return end
 	veLoaded[gameVehicleID] = nil -- (re)spawning rebuilds the vehicle's Lua VM, resend MPPerformanceVE on the next instrument tick
@@ -923,6 +941,7 @@ M.packetSent          = packetSent
 M.veReport            = veReport
 
 M.onUpdate            = onUpdate
+M.onPreRender         = onPreRender
 M.onVehicleSpawned    = onVehicleSpawned
 M.onVehicleDestroyed  = onVehicleDestroyed
 M.onExtensionUnloaded = onExtensionUnloaded
