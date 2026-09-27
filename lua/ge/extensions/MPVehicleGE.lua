@@ -67,6 +67,7 @@ end
 
 -- debug drawers, using the FFI functions for debugDraw is a lot faster and produces no garbage
 local drawTextAdvanced = ffiFound and ffi.C.BNG_DBG_DRAW_TextAdvanced or nop
+local typingSuffix = "typing... " -- added to the nametag while that player is typing in chat
 local drawSphere = ffiFound and ffi.C.BNG_DBG_DRAW_Sphere or nop
 
 --- Contains Information about Backend authorized Roles
@@ -2762,9 +2763,10 @@ local function onPreRender(dt)
 					end
 				end
 				-- draw main nametag
+				local typing = MPPlayerStatusGE and MPPlayerStatusGE.isTyping(v.ownerID)
 				drawTextAdvanced(
 					pos.x, pos.y, pos.z, -- Location
-					v.nameTag .. dist, -- Text
+					typing and (v.nameTag .. dist .. typingSuffix) or (v.nameTag .. dist), -- Text
 					color(255, 255, 255, nametagAlpha*254), -- Foreground Color, Alpha is multiplied by 254 because using 255 seems to break backround alpha in 0.37
 					true, -- Draw background 
 					false, -- Wtf

@@ -54,6 +54,9 @@ app.controller("BeamMPChatController", ['$scope', 'Settings', function ($scope, 
 			chatinput.addEventListener("mouseover", function(){ chatShown = true; showChat(); });
 			chatinput.addEventListener("mouseout", function(){ chatShown = false; });
 			chatinput.addEventListener('keydown', onKeyDown); //used for 'up arrow' last msg functionality
+			chatinput.addEventListener('input', updateTyping); // typing indicator above our nametag for everyone else
+			chatinput.addEventListener('focus', updateTyping);
+			chatinput.addEventListener('blur', updateTyping);
 		}
 
 		var chatlist = document.getElementById("chat-list");
@@ -184,6 +187,15 @@ app.controller("BeamMPChatController", ['$scope', 'Settings', function ($scope, 
 		}
 	})
 
+	var isTyping = false;
+	function updateTyping() {
+		let chatinput = document.getElementById("chat-input");
+		const typing = !!chatinput && document.activeElement === chatinput && chatinput.value.trim() !== "";
+		if (typing === isTyping) return; // only tell GE when it changes
+		isTyping = typing;
+		bngApi.engineLua('if MPPlayerStatusGE then MPPlayerStatusGE.setTyping(' + typing + ') end');
+	}
+
 	$scope.chatSend = function() {
 		let chatinput = document.getElementById("chat-input");
 		const text = chatinput.value
@@ -193,6 +205,7 @@ app.controller("BeamMPChatController", ['$scope', 'Settings', function ($scope, 
 			else {
 				bngApi.engineLua('UI.chatSend(' + bngApi.serializeToLua(text) + ')');
 				chatinput.value = '';
+				updateTyping();
 			}
 		}
 	};
