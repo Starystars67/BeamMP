@@ -54,6 +54,9 @@ local original_spawnDefault
 
 -- ============= vector cache  =============
 local cameraPos = vec3()
+local cameraRenderPos = vec3() -- actual camera position, cameraPos is replaced by the player vehicle position when not in free camera
+local camForward = vec3()
+local isFreeCamera = false
 local pos = vec3()
 local dir = vec3()
 local dirUp = vec3()
@@ -2568,20 +2571,40 @@ local function initColors()
 end
 
 
+-- settings read every frame for every vehicle in onPreRender, cached here and refreshed in onSettingsChanged
+local cachedSettingKeys = {
+	"showBlobQueued", "showBlobIllegal", "showBlobDeleted", "enableBlobs", "hideNameTags", "nameTagShowDistance",
+	"uiUnitLength", "fadeVehicles", "nameTagFadeEnabled", "nameTagFadeInvert", "nameTagDontFullyHide",
+	"showSpectators", "spectatorUnifiedColors", "nameTagsHideBehindObjects"
+}
+
+local function refreshSettingsCache()
+	for _, k in ipairs(cachedSettingKeys) do
+		settingsCache[k] = settings.getValue(k)
+	end
+	settingsCache.nameTagFadeDistance = settings.getValue("nameTagFadeDistance", 40)
+	settingsCache.ready = true
+end
+
 local function onPreRender(dt)
 	if MPGameNetwork and MPGameNetwork.launcherConnected() then
 		if not hasInitColors then
 			initColors()
 		end
 
+		if not settingsCache.ready then refreshSettingsCache() end
+
 		-- get camera position
 		cameraPos:set(core_camera.getPositionXYZ())
+		cameraRenderPos:set(cameraPos)
+		camForward:set(core_camera.getForwardXYZ())
+		isFreeCamera = commands.isFreeCamera()
 
 		-- get current vehicle ID and position
 		local activeVeh = getPlayerVehicle(0)
 		if activeVeh then
 			activeVehPos:set(activeVeh:getPositionXYZ())
-			if not commands.isFreeCamera() then cameraPos:set(activeVehPos) end
+			if not isFreeCamera then cameraPos:set(activeVehPos) end
 		end
 
 		local activeVehID = activeVeh and activeVeh:getID() or nil
@@ -2664,7 +2687,7 @@ local function onPreRender(dt)
 			pos:set(v.position)
 			pos.z = pos.z + heightOffset
 
-			if settings.getValue("enableBlobs") and not v.isSpawned then
+			if settingsCache.enableBlobs and not v.isSpawned then
 				local colors = nil
 
 				if v.spawnQueue then -- in queue
@@ -2690,61 +2713,79 @@ local function onPreRender(dt)
 			end
 
 			local nametagAlpha = 1
-			local nametagFadeoutDistance = settings.getValue("nameTagFadeDistance", 40)
 
 			local distfloat = cameraPos:distance(pos)
 			distanceMap[gameVehicleID] = distfloat
-			nametagAlpha = clamp(linearScale(distfloat, nametagFadeoutDistance, 0, 0, 1), 0, 1)
+			nametagAlpha = clamp(linearScale(distfloat, settingsCache.nameTagFadeDistance, 0, 0, 1), 0, 1)
 
-			if not settings.getValue("hideNameTags") and nicknamesAllowed and not hideNicknamesToggle then
+			if not settingsCache.hideNameTags and nicknamesAllowed and not hideNicknamesToggle then
 
-				local dist = ""
-				if distfloat > 10 and settings.getValue("nameTagShowDistance") then
-					local mapEntry = distfloat
-					if settings.getValue("uiUnitLength") == "imperial" then
-						mapEntry = mapEntry * 3.28084
-						if mapEntry > 5280 then
-							mapEntry = math.floor((mapEntry / 5280 * 100) + 0.5) / 100
-							dist = string.format("%.2f mi ", mapEntry)
-						else
-							mapEntry = math.floor(mapEntry)
-							dist = string.format("%.f ft ", mapEntry)
-						end
-					else
-						if mapEntry >= 1000 then
-							mapEntry = math.floor((mapEntry / 10) + 0.5) / 100
-							dist = string.format("%.2f km ", mapEntry)
-						else
-							mapEntry = math.floor(mapEntry)
-							dist = string.format("%.f m ", mapEntry)
-						end
+				if settingsCache.fadeVehicles and veh then
+					local meshAlpha = 1
+					if activeVehID ~= gameVehicleID then meshAlpha = 1 - clamp(linearScale(distfloat, 20, 0, 0, 1), 0, 1) end
+					if v.lastMeshAlpha ~= meshAlpha then -- only touch the mesh when the value changes, it is 1 for almost every vehicle
+						veh:setMeshAlpha(meshAlpha, "", false)
+						v.lastMeshAlpha = meshAlpha
 					end
-				end
-
-				if settings.getValue("fadeVehicles") and veh then
-					if activeVehID == gameVehicleID then veh:setMeshAlpha(1, "", false)
-					else veh:setMeshAlpha(1 - clamp(linearScale(distfloat, 20, 0, 0, 1), 0, 1), "", false) end
 				end
 
 				if v.hideNametag or owner.hideNametag then goto skip_vehicle end
 
-				if settings.getValue("nameTagFadeEnabled") and not commands.isFreeCamera() then
-					if settings.getValue("nameTagFadeInvert") then
+				if settingsCache.nameTagFadeEnabled and not isFreeCamera then
+					if settingsCache.nameTagFadeInvert then
 						nametagAlpha = 1 - nametagAlpha
 					end
 				end
 
-				if not settings.getValue("nameTagFadeEnabled") then nametagAlpha = 1 end
-				if settings.getValue("nameTagDontFullyHide") then nametagAlpha = math.max(0.3, nametagAlpha) end
+				if not settingsCache.nameTagFadeEnabled then nametagAlpha = 1 end
+				if settingsCache.nameTagDontFullyHide then nametagAlpha = math.max(0.3, nametagAlpha) end
 
+				-- nothing to draw if the tag is fully faded out or behind the camera
+				if nametagAlpha <= 0 then goto skip_vehicle end
+				if (pos.x - cameraRenderPos.x) * camForward.x + (pos.y - cameraRenderPos.y) * camForward.y + (pos.z - cameraRenderPos.z) * camForward.z < 0 then goto skip_vehicle end
+
+				-- the distance text only changes when the rounded distance changes, so the tag string is rebuilt only then
+				local dist = ""
+				if distfloat > 10 and settingsCache.nameTagShowDistance then
+					local mapEntry = distfloat
+					if settingsCache.uiUnitLength == "imperial" then
+						mapEntry = mapEntry * 3.28084
+						if mapEntry > 5280 then
+							mapEntry = math.floor((mapEntry / 5280 * 100) + 0.5) / 100
+							dist = "mi"
+						else
+							mapEntry = math.floor(mapEntry)
+							dist = "ft"
+						end
+					else
+						if mapEntry >= 1000 then
+							mapEntry = math.floor((mapEntry / 10) + 0.5) / 100
+							dist = "km"
+						else
+							mapEntry = math.floor(mapEntry)
+							dist = "m"
+						end
+					end
+					if v.nameTagDistValue ~= mapEntry or v.nameTagDistUnit ~= dist then
+						v.nameTagDistValue = mapEntry
+						v.nameTagDistUnit = dist
+						v.nameTagDistText = string.format((dist == "mi" or dist == "km") and "%.2f %s " or "%.f %s ", mapEntry, dist)
+					end
+					dist = v.nameTagDistText
+				end
+				if v.nameTagText == nil or v.nameTagTextSource ~= v.nameTag or v.nameTagTextDist ~= dist then
+					v.nameTagText = v.nameTag .. dist
+					v.nameTagTextSource = v.nameTag
+					v.nameTagTextDist = dist
+				end
 
 				local roleInfo = v.customRole or owner.customRole or owner.role
 				local backColor = color(roleInfo.backcolor.r, roleInfo.backcolor.g, roleInfo.backcolor.b, math.floor(nametagAlpha*127))
 				-- draw spectators
-				if settings.getValue("showSpectators") then
+				if settingsCache.showSpectators then
 					if v.spectatorsTag ~= "" then
 						local spectatorBackColor = backColor
-						if settings.getValue("spectatorUnifiedColors") then
+						if settingsCache.spectatorUnifiedColors then
 							spectatorBackColor = color(roleToInfo.USER.backcolor.r, roleToInfo.USER.backcolor.g, roleToInfo.USER.backcolor.b, math.floor(nametagAlpha*127))
 						end
 						drawTextAdvanced(
@@ -2755,7 +2796,7 @@ local function onPreRender(dt)
 							false, -- Wtf
 							spectatorBackColor, -- Background Color
 							false, -- shadow
-							settings.getValue("nameTagsHideBehindObjects") -- useZ, makes it render behind objects if true
+							settingsCache.nameTagsHideBehindObjects -- useZ, makes it render behind objects if true
 						)
 
 						pos.z = pos.z + 0.01 -- has to be positive
@@ -2764,13 +2805,13 @@ local function onPreRender(dt)
 				-- draw main nametag
 				drawTextAdvanced(
 					pos.x, pos.y, pos.z, -- Location
-					v.nameTag .. dist, -- Text
+					v.nameTagText, -- Text
 					color(255, 255, 255, nametagAlpha*254), -- Foreground Color, Alpha is multiplied by 254 because using 255 seems to break backround alpha in 0.37
-					true, -- Draw background 
+					true, -- Draw background
 					false, -- Wtf
 					backColor, -- Background Color
 					false, -- shadow
-					settings.getValue("nameTagsHideBehindObjects") -- useZ, makes it render behind objects if true
+					settingsCache.nameTagsHideBehindObjects -- useZ, makes it render behind objects if true
 				)
 			end
 			:: skip_vehicle ::
@@ -2904,12 +2945,9 @@ local function onSettingsChanged()
 		player:onSettingsChanged()
 	end
 
-	local cacheKeys = { "showBlobQueued", "showBlobIllegal", "showBlobDeleted" }
 	local colorKeys = { "blobColorQueued", "blobColorIllegal", "blobColorDeleted" }
 
-	for _,k in pairs(cacheKeys) do
-		settingsCache[k] = settings.getValue(k)
-	end
+	refreshSettingsCache()
 
 	--for _,v in pairs(colorKeys) do
 	--	local p = table.pack(MPHelpers.hex2rgb(settings.getValue(k)))
