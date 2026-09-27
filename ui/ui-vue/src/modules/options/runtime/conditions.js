@@ -278,6 +278,9 @@ export default function (deps) {
     beammpModernNametagsEnabled(values) {
         return values.useModernNametags===true
     },
+    beammpRemoteVehicleCullingEnabled(values) {
+        return values.remoteVehicleCulling===true
+    },
   }
 
   return { setInitialValues, conditions, initialValues }
