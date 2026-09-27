@@ -69,6 +69,8 @@ local function handle(rawData)
 	end
 
 	if code == "e" then -- Electrics (indicators, lights etc...)
+		-- player status (typing etc) rides along as an electrics value, a packet with only that doesn't need to go to VE
+		if data:find('"beammp_status"', 1, true) and MPPlayerStatusGE and MPPlayerStatusGE.handle(serverVehicleID, data) then return end
 		applyElectrics(data, serverVehicleID)
 	else
 		log('W', 'handle', "Received unknown packet '"..tostring(code).."'! ".. rawData)
