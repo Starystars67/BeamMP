@@ -1526,6 +1526,8 @@ local function applyVehSpawn(event)
 	local spawnedVehID = getGameVehicleID(event.serverVehicleID)
 	local spawnedVeh = spawnedVehID and getObjectByID(spawnedVehID) or nil
 
+	if spawnedVeh and MPVehiclePoolGE then MPVehiclePoolGE.wake(event.serverVehicleID, true) end
+
 	if spawnedVeh then -- if a vehicle with this ID was found update the obj
 		log('W', 'applyVehSpawn', "(spawn)Updating vehicle from server "..vehicleName.." with id "..spawnedVehID)
 		spawn.setVehicleObject(spawnedVeh, {model=vehicleName, config=serialize(vehicleConfig), pos=pos, rot=rot, cling=true})
@@ -1570,6 +1572,8 @@ local function applyVehEdit(serverID, data)
 
 	local veh = getObjectByID(gameVehicleID) -- Get the vehicle
 	if not veh then log('E','applyVehEdit',"Vehicle "..gameVehicleID.." not found") return end
+
+	if MPVehiclePoolGE then MPVehiclePoolGE.wake(serverID, true) end -- edits may be applied from the queue long after the packet arrived
 
 	local decodedData   = jsonDecode(data) -- Decode the data
 	local vehicleName   = decodedData.jbm -- Vehicle name
@@ -2268,6 +2272,12 @@ local HandleNetwork = {
 local function handle(rawData)
 	local code = string.sub(rawData, 1, 1)
 	local rawData = string.sub(rawData, 3)
+	if MPVehiclePoolGE and (code == 'r' or code == 't' or code == 'p') then
+		-- resets, couplers and paint of a culled vehicle are held and replayed in order when it wakes,
+		-- so players spamming reset far away don't keep their vehicle simulated (edits wake in applyVehEdit)
+		local serverVehicleID = string.match(rawData, "^(%d+%-%d+)")
+		if serverVehicleID and MPVehiclePoolGE.intercept(serverVehicleID, "O", code .. ":" .. rawData) then return end
+	end
 	if HandleNetwork[code] then
 		HandleNetwork[code](rawData)
 	else
@@ -2473,6 +2483,7 @@ local function focusCameraOnPlayer(targetName)
 
 			if vehicle.gameVehicleID ~= activeVehicleID and targetVeh then
 				log('I', "focusCameraOnPlayer", "Entering vehicle "..vehicle.gameVehicleID)
+				if MPVehiclePoolGE then MPVehiclePoolGE.wake(serverVehicleID, true) end
 				be:enterVehicle(0,targetVeh)
 				return
 			end
