@@ -534,7 +534,11 @@ local function drawGraph(id, height, series, ringHead, ringCount, ringSize, show
 				if v > peak then peak = v end
 			end
 			if peak > flat then -- a series that stays at ~0 is just a line on the axis, skip the draw calls
-				local px, py
+				-- flat stretches are drawn as one segment: a vertex is only added where the line moves by half a pixel or
+				-- more. VE values only change 4 times a second and most extensions sit still, so this saves most draw calls
+				local thickness = s.thickness or 1.5
+				local px, py -- last vertex drawn to
+				local lx, ly -- end of the flat stretch we're on, not drawn yet
 				for bs = firstBucket, absNewest, bucket do
 					local be = math.min(bs + bucket - 1, absNewest)
 					local v = 0
@@ -544,9 +548,17 @@ local function drawGraph(id, height, series, ringHead, ringCount, ringSize, show
 					end
 					local x = ox + width - (absNewest - be) * step
 					local y = oy + height - math.min(v / yMax, 1) * height
-					if px then im.ImDrawList_AddLine(dl, vec2(p1, px, py), vec2(p2, x, y), col, s.thickness or 1.5) end
-					px, py = x, y
+					if not px then
+						px, py, lx, ly = x, y, x, y
+					elseif math.abs(y - ly) < 0.5 then
+						lx = x -- still flat, just extend it
+					else
+						if lx ~= px then im.ImDrawList_AddLine(dl, vec2(p1, px, py), vec2(p2, lx, ly), col, thickness) end
+						im.ImDrawList_AddLine(dl, vec2(p1, lx, ly), vec2(p2, x, y), col, thickness)
+						px, py, lx, ly = x, y, x, y
+					end
 				end
+				if px and lx ~= px then im.ImDrawList_AddLine(dl, vec2(p1, px, py), vec2(p2, lx, ly), col, thickness) end
 			end
 		end
 
