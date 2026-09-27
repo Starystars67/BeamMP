@@ -32,5 +32,13 @@
         "isBasic": true,
         "title": "Toggle Chat",
         "desc": "Toggle the chat window"
+    },
+    "togglePerformanceGraph": {
+        "cat": "beammp",
+        "order": 4,
+        "ctx": "tlua",
+        "onDown": "if MPPerformanceGraph then MPPerformanceGraph.toggle() end",
+        "title": "BeamMP Performance Graph",
+        "desc": "Toggle the BeamMP performance graph (Lua time per BeamMP extension, GE and VE, and network traffic)"
     }
 }
