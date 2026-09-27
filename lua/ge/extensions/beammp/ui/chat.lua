@@ -390,6 +390,8 @@ local function render()
                 imgui.SetKeyboardFocusHere(1)
             end
         end
+        -- typing = the input is focused and has something in it (MPPlayerStatusGE only sends when it changes)
+        if MPPlayerStatusGE then MPPlayerStatusGE.setTypingImgui(imgui.IsItemActive() and chatMessageBuf[0] ~= 0) end
 
         imgui.SameLine()
         if utils.imageButton(UI.uiIcons.send.texId, 20) then

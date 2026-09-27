@@ -19,7 +19,7 @@
         </li>
       </ul>
 
-      <form ref="chatBoxRef" class="chatbox" :style="chatBoxStyle" @submit.prevent="sendChat">
+      <form ref="chatBoxRef" class="chatbox" :style="chatBoxStyle" @submit.prevent="sendChat" @focusin="chatHasFocus = true" @focusout="chatHasFocus = false">
         <button
           class="buttons send-button"
 		  id="send-button"
@@ -62,7 +62,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, onUnmounted, ref } from "vue"
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue"
 import { useBridge } from "@/bridge"
 import { BngDropdown, BngInput, ACCENTS } from "@/common/components/base"
 
@@ -81,6 +81,13 @@ const enableNewChatMenu = ref(false)
 const useUiAppRedesign = ref(false)
 const isHovered = ref(false)
 const isFocused = ref(false)
+const chatHasFocus = ref(false)
+
+// typing indicator above our nametag for everyone else, only sent to GE when it changes
+const isTyping = computed(() => chatHasFocus.value && inputText.value.trim() !== "")
+watch(isTyping, (typing) => {
+  api.engineLua(`if MPPlayerStatusGE then MPPlayerStatusGE.setTyping(${typing}) end`)
+})
 const chatHorizontal = ref(localStorage.getItem("chatHorizontal") || "middle")
 const chatVertical = ref(localStorage.getItem("chatVertical") || "bottom")
 const nowTick = ref(Date.now())
