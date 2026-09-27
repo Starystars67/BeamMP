@@ -39,6 +39,6 @@
         "ctx": "tlua",
         "onDown": "if MPPerformanceGraph then MPPerformanceGraph.toggle() end",
         "title": "BeamMP Performance Graph",
-        "desc": "Toggle the BeamMP performance graph (Lua time per BeamMP extension and network traffic)"
+        "desc": "Toggle the BeamMP performance graph (Lua time per BeamMP extension, GE and VE, and network traffic)"
     }
 }

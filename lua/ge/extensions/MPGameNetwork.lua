@@ -126,7 +126,7 @@ local function sendData(data) -- TODO currently the socket keeps retrying indefi
 			log('M', 'sendData', 'Sending Data ('..bytes..'): '..data)
 		end
 		if MPDebug then MPDebug.packetSent(bytes) end
-		if MPPerformanceGraph then MPPerformanceGraph.packetSent(packet:byte(5), bytes) end -- first byte after the 4 byte length header is the packet code
+		if MPPerformanceGraph then MPPerformanceGraph.packetSent(data:byte(1), bytes) end -- first byte of the data is the packet code
 	end
 end
 

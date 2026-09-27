@@ -236,7 +236,7 @@ local function makeGcWrapper(i, fn)
 		return ...
 	end
 	return function(...)
-		if depth == 0 and not gcStopped then
+		if depth == 0 and not gcStopped and collect("isrunning") then -- leave it alone if something else already stopped it
 			gcStopped = true
 			collect("stop")
 		end
@@ -270,9 +270,8 @@ local function instrumentVehicles()
 end
 
 local function uninstrumentVehicles()
-	for _, veh in ipairs(getAllVehicles()) do
-		if veLoaded[veh:getID()] then veh:queueLuaCommand("extensions.unload('MPPerformanceVE')") end
-	end
+	-- every vehicle, not just veLoaded ones: one that was respawning gets MPPerformanceVE back from the game by itself
+	for _, veh in ipairs(getAllVehicles()) do veh:queueLuaCommand("extensions.unload('MPPerformanceVE')") end
 	veLoaded, veVehicles = {}, {}
 end
 
@@ -371,7 +370,12 @@ end
 -- @tparam number frames VE frames the report covers
 -- @tparam table values flat { ms, calls, KB } per VE module, same order as veModules
 local function veReport(gameVehicleID, frames, values)
-	if not active or type(values) ~= "table" or #values < #veModules * 3 then return end -- not started yet (e.g. just reloaded) or from an older version
+	if not active then -- left over in a vehicle that was reloaded around the time the window closed, tell it to stop
+		local veh = be:getObjectByID(gameVehicleID)
+		if veh then veh:queueLuaCommand("extensions.unload('MPPerformanceVE')") end
+		return
+	end
+	if type(values) ~= "table" or #values < #veModules * 3 then return end -- not started yet (e.g. just reloaded) or from an older version
 	local v = veVehicles[gameVehicleID]
 	if not v then
 		v = {}

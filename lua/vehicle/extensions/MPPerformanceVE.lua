@@ -76,7 +76,7 @@ local function makeGcWrapper(i, fn)
 		return ...
 	end
 	return function(...)
-		if depth == 0 and not gcStopped then
+		if depth == 0 and not gcStopped and collect("isrunning") then -- leave it alone if something else already stopped it
 			gcStopped = true
 			collect("stop")
 		end
