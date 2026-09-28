@@ -70,6 +70,9 @@ setExtensionUnloadMode("MPPlayerStatusGE", "manual")
 load("MPNametagsGE")
 setExtensionUnloadMode("MPNametagsGE", "manual")
 
+load("MPMapPlayersGE")
+setExtensionUnloadMode("MPMapPlayersGE", "manual")
+
 load("nodesGE")
 setExtensionUnloadMode("nodesGE", "manual")
 
