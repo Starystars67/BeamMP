@@ -143,3 +143,6 @@ table#players-table > tbody > tr:nth-child(even) {
 .player-status-lag {
     color: #f0a940;
 }
+.player-status-blocked {
+    font-size: 0.75em;
+}

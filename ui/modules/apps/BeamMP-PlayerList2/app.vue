@@ -53,7 +53,8 @@
 							<span v-if="player.flags.typing" class="player-status" :title="$tt('ui.apps.beammp.playerlist.typing') || 'Typing'">…</span>
 							<span v-if="player.flags.away" class="player-status" :title="$tt('ui.apps.beammp.playerlist.away') || 'Away'">☾</span>
 							<span v-if="player.flags.lag" class="player-status player-status-lag" :title="$tt('ui.apps.beammp.playerlist.lagging') || 'Lagging'">⚠</span>
-							<span v-if="player.flags.muted" class="player-status" :title="$tt('ui.apps.beammp.playerlist.muted') || 'Muted'">⊘</span>
+							<span v-if="player.flags.blocked" class="player-status player-status-blocked" :title="$tt('ui.apps.beammp.playerlist.blocked') || 'Blocked'">⊗</span>
+							<span v-else-if="player.flags.muted" class="player-status" :title="$tt('ui.apps.beammp.playerlist.muted') || 'Muted'">⊘</span>
 							<span v-if="player.flags.navigating" class="player-status" :title="$tt('ui.apps.beammp.playerlist.navigating') || 'Navigating to'">➤</span>
 						</td>
 						<td class="ping-cell table-cell">
@@ -92,7 +93,7 @@
 			<button type="button" @click="applyQueuesForPlayer(contextMenu.player?.id)">
 				{{ $tt("ui.apps.beammp.playerlist.queueEvents") }}
 			</button>
-			<button type="button" @click="showPlayerInfo(contextMenu.player?.name)">
+			<button v-if="!contextMenu.player?.flags.blocked" type="button" @click="showPlayerInfo(contextMenu.player?.name)">
 				{{ $tt("ui.apps.beammp.playerlist.switchCameraTo") }}
 			</button>
 			<button type="button" @click="openProfile(contextMenu.player?.name)">
@@ -101,11 +102,14 @@
 			<button type="button" @click="restorePlayerVehicle(contextMenu.player?.name)">
 				{{ $tt("ui.apps.beammp.playerlist.restoreVehicles") }}
 			</button>
-			<button v-if="contextMenu.player?.name !== ownName" type="button" @click="navigateToPlayer(contextMenu.player?.name)">
+			<button v-if="contextMenu.player?.name !== ownName && !contextMenu.player?.flags.blocked" type="button" @click="navigateToPlayer(contextMenu.player?.name)">
 				{{ contextMenu.player?.flags.navigating ? ($tt("ui.apps.beammp.playerlist.stopNavigating") || "Stop navigating") : ($tt("ui.apps.beammp.playerlist.navigateTo") || "Navigate to") }}
 			</button>
-			<button v-if="contextMenu.player?.name !== ownName" type="button" @click="mutePlayer(contextMenu.player)">
+			<button v-if="contextMenu.player?.name !== ownName && !contextMenu.player?.flags.blocked" type="button" @click="mutePlayer(contextMenu.player)">
 				{{ contextMenu.player?.flags.muted ? ($tt("ui.apps.beammp.playerlist.unmute") || "Unmute chat") : ($tt("ui.apps.beammp.playerlist.mute") || "Mute chat") }}
+			</button>
+			<button v-if="contextMenu.player?.name !== ownName" type="button" @click="blockPlayer(contextMenu.player)">
+				{{ contextMenu.player?.flags.blocked ? ($tt("ui.apps.beammp.playerlist.unblock") || "Unblock") : ($tt("ui.apps.beammp.playerlist.block") || "Block") }}
 			</button>
 			<button
 				v-for="label in customButtons"
@@ -247,6 +251,12 @@ function pingClass(ping) {
 function navigateToPlayer(name) {
 	if (!name) return closeContextMenu()
 	api.engineLua(`UI.navigateToPlayer(${api.serializeToLua(String(name))})`)
+	closeContextMenu()
+}
+
+function blockPlayer(player) {
+	if (!player?.name) return closeContextMenu()
+	api.engineLua(`UI.blockPlayer(${api.serializeToLua(String(player.name))}, ${player.flags.blocked ? "false" : "true"})`)
 	closeContextMenu()
 }
 
@@ -632,6 +642,10 @@ onUnmounted(() => {
 
 .player-status-lag {
 	color: #f0a940;
+}
+
+.player-status-blocked {
+	font-size: 0.75em;
 }
 
 .show-button {
