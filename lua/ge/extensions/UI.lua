@@ -106,6 +106,8 @@ local chatcounter = 0
 
 local STATUS_INTERVAL = 0.5 -- seconds between player list status checks (typing, away, lagging)
 local mutedPlayers = {} -- [name] = true, only for this session
+local blockedPlayers = {} -- [name] = true, only for this session: vehicles, nametag, maps and chat hidden
+local blockedCount = 0
 local navigatingTo -- name of the player the ground markers are following
 local statusTimer = 0
 local sentStatus = ""
@@ -154,6 +156,7 @@ local function playerFlags(name, player)
 		if MPPlayerStatusGE.isLagging(player.playerID) then flags.lag = true end
 	end
 	if mutedPlayers[name] then flags.muted = true end
+	if blockedPlayers[name] then flags.blocked = true end
 	if navigatingTo == name then flags.navigating = true end
 	return flags
 end
@@ -213,10 +216,42 @@ local function isMuted(name)
 	return mutedPlayers[name] == true
 end
 
+--- Blocks or unblocks a player for you, until you leave the server. Their vehicles are switched off (hidden, no
+--- collisions), their nametag and map markers go, and their chat messages only show as a count.
+-- @tparam string name
+-- @tparam boolean blocked
+local function blockPlayer(name, blocked)
+	if type(name) ~= "string" or name == "" or name == MPConfig.getNickname() then return end
+	blocked = blocked and true or nil
+	if blockedPlayers[name] == blocked then return end
+	blockedPlayers[name] = blocked
+	blockedCount = blockedCount + (blocked and 1 or -1)
+	if blocked and navigatingTo == name then
+		navigatingTo = nil
+		MPVehicleGE.groundmarkerFollowPlayer(nil)
+	end
+	if not blocked and MPVehiclePoolGE then MPVehiclePoolGE.wakePlayer(name) end -- blocking is picked up next frame
+	if MPMapPlayersGE then MPMapPlayersGE.refresh() end
+	sendPlayerStatus(true)
+end
+
+--- Returns if a player is blocked.
+-- @tparam string name
+-- @treturn boolean
+local function isBlocked(name)
+	return blockedPlayers[name] == true
+end
+
+--- Returns if anyone is blocked, so the per frame checks can be skipped.
+-- @treturn boolean
+local function hasBlocked()
+	return blockedCount > 0
+end
+
 --- Sets the ground markers to follow a player, or stops if they're already being followed.
 -- @tparam string name
 local function navigateToPlayer(name)
-	if not name or navigatingTo == name then
+	if not name or navigatingTo == name or blockedPlayers[name] then
 		navigatingTo = nil
 		MPVehicleGE.groundmarkerFollowPlayer(nil)
 	else
@@ -553,6 +588,14 @@ local function chatMessage(rawMessage) -- chat message received (angular)
 	local username = parts[1]
 	parts[1] = ''
 	local msg = string.gsub(message, username..': ', '')
+	if blockedPlayers[username] then
+		-- only a count shows, "2 messages from a blocked player"
+		log('M', 'chatMessage', 'Chat message received from blocked player: '..username..' >' ..msg) -- DO NOT REMOVE
+		guihooks.trigger("onBeamMPChatMessage", {username = "", message = "", id = chatcounter, blocked = true})
+		chatWindow.addBlockedMessage()
+		TriggerClientEvent("ChatMessageReceived", message, username)
+		return
+	end
 	local muted = mutedPlayers[username] or nil -- still sent, the chats show it as hidden with a click to read it
 	local mention = not muted and isMention(username, msg)
 	if mention and settings.getValue("chatMentionSound") ~= false then
@@ -613,14 +656,14 @@ end
 -- @param mission table The mission object.
 local function onClientEndMission(mission)
     pings = {}
-	mutedPlayers, navigatingTo, sentStatus = {}, nil, ""
+	mutedPlayers, blockedPlayers, blockedCount, navigatingTo, sentStatus = {}, {}, 0, nil, ""
     chatWindow.chatMessages = {}
     chatWindow.clearHistory()
 end
 
--- mutes are only for the session
+-- mutes and blocks are only for the session
 local function onDisconnect()
-	mutedPlayers, navigatingTo, sentStatus = {}, nil, ""
+	mutedPlayers, blockedPlayers, blockedCount, navigatingTo, sentStatus = {}, {}, 0, nil, ""
 end
 
 local function fixOldHUDLayout()
@@ -775,6 +818,9 @@ M.toggleChat = toggleChat
 
 M.mutePlayer = mutePlayer
 M.isMuted = isMuted
+M.blockPlayer = blockPlayer
+M.isBlocked = isBlocked
+M.hasBlocked = hasBlocked
 M.navigateToPlayer = navigateToPlayer
 M.sendPlayerStatus = sendPlayerStatus
 

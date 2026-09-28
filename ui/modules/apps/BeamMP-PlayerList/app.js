@@ -140,7 +140,8 @@ app.controller("BeamMPPlayerListController", ['$scope', '$filter', 'Settings', f
 			if (flags.typing) html += '<span class="player-status" title="Typing">…</span>';
 			if (flags.away) html += '<span class="player-status" title="Away">☾</span>';
 			if (flags.lag) html += '<span class="player-status player-status-lag" title="Lagging">⚠</span>';
-			if (flags.muted) html += '<span class="player-status" title="Muted">⊘</span>';
+			if (flags.blocked) html += '<span class="player-status player-status-blocked" title="Blocked">⊗</span>';
+			else if (flags.muted) html += '<span class="player-status" title="Muted">⊘</span>';
 			if (flags.navigating) html += '<span class="player-status" title="Navigating to">➤</span>';
 			spans[i].innerHTML = html;
 		}
@@ -302,17 +303,25 @@ app.controller("BeamMPPlayerListController", ['$scope', '$filter', 'Settings', f
 					var flags = statusByName[parsedList[i].name] || {};
 					var isSelf = parsedList[i].name === nickname;
 					var navigateButton = document.getElementById("pl-context-NavigateButton");
-					navigateButton.style.display = isSelf ? "none" : "";
+					navigateButton.style.display = (isSelf || flags.blocked) ? "none" : "";
 					navigateButton.textContent = flags.navigating ? "Stop navigating" : "Navigate to";
 					navigateButton.onclick = function() {
 						bngApi.engineLua(`UI.navigateToPlayer(require("mime").unb64('` + btoa(parsedList[i].name) + `'))`);
 						playerlistContextmenu.style.display = "none";
 					}
+					document.getElementById("pl-context-SwitchCameraButton").style.display = flags.blocked ? "none" : "";
 					var muteButton = document.getElementById("pl-context-MuteButton");
-					muteButton.style.display = isSelf ? "none" : "";
+					muteButton.style.display = (isSelf || flags.blocked) ? "none" : "";
 					muteButton.textContent = flags.muted ? "Unmute chat" : "Mute chat";
 					muteButton.onclick = function() {
 						bngApi.engineLua(`UI.mutePlayer(require("mime").unb64('` + btoa(parsedList[i].name) + `'), ` + (flags.muted ? "false" : "true") + `)`);
+						playerlistContextmenu.style.display = "none";
+					}
+					var blockButton = document.getElementById("pl-context-BlockButton");
+					blockButton.style.display = isSelf ? "none" : "";
+					blockButton.textContent = flags.blocked ? "Unblock" : "Block";
+					blockButton.onclick = function() {
+						bngApi.engineLua(`UI.blockPlayer(require("mime").unb64('` + btoa(parsedList[i].name) + `'), ` + (flags.blocked ? "false" : "true") + `)`);
 						playerlistContextmenu.style.display = "none";
 					}
 

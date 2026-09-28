@@ -47,13 +47,20 @@ local function distanceText(d)
 	return string.format("%d m", math.floor(d / 10 + 0.5) * 10)
 end
 
--- remote vehicles that are spawned, calls fn(serverVehicleID, v, owner, veh)
+local vehPos = vec3()
+
+-- remote vehicles that are spawned, calls fn(serverVehicleID, v, owner, pos). Not blocked players, and a culled
+-- (deactivated) vehicle doesn't move, so its position comes from the network like its nametag
 local function forEachRemote(fn)
+	local anyBlocked = UI and UI.hasBlocked()
 	for serverVehicleID, v in pairs(MPVehicleGE.getVehicles()) do
 		if not v.isLocal and v.isSpawned and v.gameVehicleID then
 			local owner = v:getOwner()
 			local veh = owner and getObjectByID(v.gameVehicleID)
-			if veh then fn(serverVehicleID, v, owner, veh) end
+			if veh and not (anyBlocked and UI.isBlocked(owner.name)) then
+				if veh:getActive() then vehPos:set(veh:getPositionXYZ()) else vehPos:set(v.position) end
+				fn(serverVehicleID, v, owner, vehPos)
+			end
 		end
 	end
 end
@@ -68,10 +75,10 @@ local DOT_OUTLINE = 1.5
 local drawTd
 local dotPos = vec3()
 
-local function drawDot(serverVehicleID, v, owner, veh)
+local function drawDot(serverVehicleID, v, owner, pos)
 	local dpi = ui_apps_minimap_utils.dpi
 	local col = roleColor(owner, v)
-	dotPos:set(veh:getPositionXYZ())
+	dotPos:set(pos)
 	ui_apps_minimap_utils.worldToMapXYZ(dotPos, dotPos)
 	drawTd:circle(dotPos.x, dotPos.y, DOT_RADIUS * dpi, DOT_OUTLINE * dpi, col, col, outlineColor, outlineColor, 0, DOT_LAYER)
 end
@@ -98,8 +105,8 @@ local function onGetRawPoiListForLevel(levelIdentifier, elements)
 	if not inSession() then return end
 	local me = getPlayerVehicle(0)
 	local from = me and me:getPosition() or core_camera.getPosition()
-	forEachRemote(function(serverVehicleID, v, owner, veh)
-		local pos = veh:getPosition()
+	forEachRemote(function(serverVehicleID, v, owner, vehPos)
+		local pos = vec3(vehPos) -- kept by the POI
 		local role = v.nameTagRole or ""
 		local dist = distanceText(pos:distance(from))
 		local id = "beammpPlayer" .. serverVehicleID
@@ -133,6 +140,11 @@ local function onBigmapBuildCustomGroupStructures(groupStructures)
 	table.insert(groupStructures, { key = GROUP_KEY, icon = "carStarred", title = "Players", groupIds = { GROUP_KEY } })
 end
 
+--- Rebuilds the big map players now if it's open, eg after someone was blocked.
+local function refresh()
+	if freeroam_bigMapMode and freeroam_bigMapMode.bigMapActive() then refreshTimer = REFRESH_INTERVAL end
+end
+
 local function onUpdate(dtReal)
 	if not (freeroam_bigMapMode and freeroam_bigMapMode.bigMapActive()) or not inSession() then
 		refreshTimer = 0
@@ -152,6 +164,7 @@ local function onUpdate(dtReal)
 end
 
 
+M.refresh                            = refresh
 M.onDrawOnMinimap                    = onDrawOnMinimap
 M.onGetRawPoiListForLevel            = onGetRawPoiListForLevel
 M.onBigmapBuildGroupData             = onBigmapBuildGroupData

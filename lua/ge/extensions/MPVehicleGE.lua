@@ -2663,6 +2663,7 @@ local function onPreRender(dt)
 			--playerCount = playerCount + 1
 			local owner = v:getOwner()
 			if v.isLocal or not owner then goto skip_vehicle end
+			if UI and UI.hasBlocked() and UI.isBlocked(owner.name) then goto skip_vehicle end -- no nametag or blob for blocked players
 			local gameVehicleID = v.gameVehicleID
 			local veh = getObjectByID(gameVehicleID)
 			local heightOffset = 0

@@ -279,6 +279,25 @@ local function addMessage(username, message, id, color, mention, muted)
     end
 end
 
+--- Counts a message from a blocked player, one line that goes up while they keep sending ("3 messages from a blocked player").
+local function addBlockedMessage()
+    local last = M.chatMessages[#M.chatMessages]
+    if last and last.blockedNote then
+        last.blockedNote = last.blockedNote + 1
+        last.sentTime = os.time()
+        return
+    end
+    table.insert(M.chatMessages, {
+        username = "",
+        message = {},
+        sentTime = os.time(),
+        id = #M.chatMessages + 1,
+        currentWidth = 0,
+        currentHeight = imgui.CalcTextSize("1").y,
+        blockedNote = 1
+    })
+end
+
 local totalChatHeight = 0
 
 local function recalculateChatHeight(windowWidth)
@@ -339,33 +358,37 @@ local function render()
 
             columnWidth = columnWidth - 10
             
-            if message.mention then
-                imgui.TextColored(mentionColor, "@")
-                imgui.SameLine()
-            end
-            if message.color then
-                    imgui.TextColored(message.color, message.username)
-                imgui.SameLine()
+            if message.blockedNote then
+                imgui.TextColored(hiddenColor, message.blockedNote == 1 and "1 message from a blocked player" or (message.blockedNote .. " messages from a blocked player"))
             else
-                imgui.Text(message.username .. ": ")
-                imgui.SameLine()
-            end
+                if message.mention then
+                    imgui.TextColored(mentionColor, "@")
+                    imgui.SameLine()
+                end
+                if message.color then
+                        imgui.TextColored(message.color, message.username)
+                    imgui.SameLine()
+                else
+                    imgui.Text(message.username .. ": ")
+                    imgui.SameLine()
+                end
       
-            local currentWidth = message.currentWidth
+                local currentWidth = message.currentWidth
 
-            if message.hidden then
-                imgui.TextColored(hiddenColor, "hidden message, click to show")
-                if imgui.IsItemClicked() then message.hidden = false end
-            else
-                for _, v in ipairs(message.message) do
-                    if (currentWidth + v.width <= columnWidth) then
-                        imgui.SameLine(currentWidth)
-                    else
-                        currentWidth = 0
+                if message.hidden then
+                    imgui.TextColored(hiddenColor, "hidden message, click to show")
+                    if imgui.IsItemClicked() then message.hidden = false end
+                else
+                    for _, v in ipairs(message.message) do
+                        if (currentWidth + v.width <= columnWidth) then
+                            imgui.SameLine(currentWidth)
+                        else
+                            currentWidth = 0
+                        end
+                        currentWidth = currentWidth + v.width
+                        imgui.TextColored(v.color, v.text)
+                        if message.muted and imgui.IsItemClicked() then message.hidden = true end -- click again to hide it
                     end
-                    currentWidth = currentWidth + v.width
-                    imgui.TextColored(v.color, v.text)
-                    if message.muted and imgui.IsItemClicked() then message.hidden = true end -- click again to hide it
                 end
             end
 
@@ -445,6 +468,7 @@ end
 M.render = render
 M.sendChatMessage = sendChatMessage
 M.addMessage = addMessage
+M.addBlockedMessage = addBlockedMessage
 M.clearHistory = clearHistory
 
 return M
