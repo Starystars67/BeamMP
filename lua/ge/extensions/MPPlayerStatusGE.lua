@@ -3,10 +3,9 @@
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 
 --- MPPlayerStatusGE API.
---- Small player status shared with everyone else on the server, for now just "typing in chat".
---- It's sent as an extra electrics value ("beammp_status") on one of our own vehicles. Servers already relay electrics
---- for your own vehicles as they are, so this works on every server without a server update or plugin, and clients
---- without this just get an electrics value they don't use.
+--- Player status shared with everyone on the server: typing in chat, and away (game not focused).
+--- Sent as an extra electrics value ("beammp_status") on one of our vehicles. Servers already pass electrics on as they
+--- are, so it works on every server without an update or plugin, and older clients just ignore it.
 --- @module MPPlayerStatusGE
 --- @usage MPPlayerStatusGE.isTyping(playerID) -- true while that player is typing in chat
 
@@ -14,21 +13,23 @@ local M = {}
 
 -- status bits, more can be added later (AFK, in menu...) without changing the packet
 local STATUS_TYPING = 1
+local STATUS_AWAY = 2
 
 local RESEND_INTERVAL = 2 -- seconds between resends while a status is set, so players that join late or missed a packet catch up
 local REMOTE_TIMEOUT = 5  -- seconds without hearing from a player before their status is cleared (lost "stopped typing", left etc)
+local AWAY_AFTER = 10     -- seconds with the game window unfocused (alt tabbed) before we show as away
 
 local localStatus = 0
 local sentStatus = 0
 local typingCef, typingImgui = false, false -- each chat window reports on its own so they can't overwrite each other
 local imguiTypingAge = 0 -- the imgui chat reports every frame it's drawn, if it stops (window closed) typing ends
+local unfocusedFor = 0
+local focusTimer = 0
 local resendTimer = 0
 local remoteStatus = {} -- [playerID] = { status = bits, age = seconds since last heard }
 
 
--------------------------------------------------------------------------------
--- Sending
--------------------------------------------------------------------------------
+-- ============= SENDING =============
 
 -- one vehicle is enough, the status belongs to the player not the vehicle
 local function getOwnServerVehicleID()
@@ -59,7 +60,7 @@ local function updateTyping()
 	setStatusBit(STATUS_TYPING, typingCef or typingImgui)
 end
 
---- Sets whether we're typing in the CEF chat. Called by the chat app when it changes, and when a message is sent.
+--- Sets whether we're typing in the CEF chat, called by the chat apps when it changes and when a message is sent.
 -- @tparam boolean typing
 local function setTyping(typing)
 	typingCef = typing and true or false
@@ -76,9 +77,7 @@ local function setTypingImgui(typing)
 end
 
 
--------------------------------------------------------------------------------
--- Receiving
--------------------------------------------------------------------------------
+-- ============= RECEIVING =============
 
 --- Takes the status out of a received electrics packet. Called by MPElectricsGE.
 -- @tparam string serverVehicleID
@@ -101,6 +100,14 @@ local function handle(serverVehicleID, data)
 	return data:match('^{"beammp_status":%d+}$') ~= nil
 end
 
+--- Returns if a player is away (their game has been out of focus for a while).
+-- @tparam number playerID
+-- @treturn boolean
+local function isAway(playerID)
+	local s = remoteStatus[playerID]
+	return s ~= nil and bit.band(s.status, STATUS_AWAY) ~= 0
+end
+
 --- Returns if a player is typing in chat.
 -- @tparam number playerID
 -- @treturn boolean
@@ -110,11 +117,15 @@ local function isTyping(playerID)
 end
 
 
--------------------------------------------------------------------------------
--- Events
--------------------------------------------------------------------------------
+-- ============= EVENTS =============
 
 local function onUpdate(dt)
+	focusTimer = focusTimer + dt
+	if focusTimer >= 1 then -- once a second is plenty
+		if Engine and Engine.isProgramFocused and not Engine.isProgramFocused() then unfocusedFor = unfocusedFor + focusTimer else unfocusedFor = 0 end
+		focusTimer = 0
+		setStatusBit(STATUS_AWAY, unfocusedFor >= AWAY_AFTER)
+	end
 	if typingImgui then
 		imguiTypingAge = imguiTypingAge + dt
 		if imguiTypingAge > 0.5 then -- imgui chat stopped drawing while we were typing
@@ -135,6 +146,7 @@ end
 local function onDisconnect()
 	localStatus, sentStatus, resendTimer = 0, 0, 0
 	typingCef, typingImgui = false, false
+	unfocusedFor, focusTimer = 0, 0
 	remoteStatus = {}
 end
 
@@ -142,6 +154,7 @@ end
 M.setTyping      = setTyping
 M.setTypingImgui = setTypingImgui
 M.isTyping       = isTyping
+M.isAway         = isAway
 M.handle         = handle
 
 M.onUpdate       = onUpdate

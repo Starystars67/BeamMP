@@ -275,6 +275,9 @@ export default function (deps) {
     beammpNameTagFadeEnabled(values) {
         return values.nameTagFadeEnabled===true
     },
+    beammpModernNametagsEnabled(values) {
+        return values.useModernNametags===true
+    },
   }
 
   return { setInitialValues, conditions, initialValues }
