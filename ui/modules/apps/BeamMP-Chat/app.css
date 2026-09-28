@@ -196,3 +196,26 @@
         font-size: 1rem;
     }
 }
+
+/* someone mentioned us */
+.beammpChat .chat-message.chat-message-mention {
+    border-left-color: #f0a940;
+    background: rgba(240, 169, 64, 0.22);
+}
+
+/* new messages while we weren't looking */
+.beammpChat .chat-unread {
+    align-self: center;
+    margin: 0 0.3rem;
+    padding: 0.1rem 0.45rem;
+    border-radius: 1rem;
+    background: var(--bng-cool-gray-600, #4a5063);
+    color: var(--bng-off-white, #fff);
+    font-size: 0.8em;
+    white-space: nowrap;
+}
+
+.beammpChat .chat-unread.chat-unread-mention {
+    background: #f0a940;
+    color: #1b1f2a;
+}
