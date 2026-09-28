@@ -68,6 +68,7 @@ end
 -- debug drawers, using the FFI functions for debugDraw is a lot faster and produces no garbage
 local drawTextAdvanced = ffiFound and ffi.C.BNG_DBG_DRAW_TextAdvanced or nop
 local typingSuffix = "typing... " -- added to the nametag while that player is typing in chat
+local awaySuffix = "away " -- same while their game is out of focus
 local drawSphere = ffiFound and ffi.C.BNG_DBG_DRAW_Sphere or nop
 
 --- Contains Information about Backend authorized Roles
@@ -1170,6 +1171,9 @@ function Vehicle:updateNameTagCache()
 		suffix = suffix..tag.." "
 	end
 	self.nameTag = String(" " .. table.concat({prefix, name, suffix, tag}) .. " ")
+	-- same parts on their own for the modern nametags, which show the role on its own line
+	self.nameTagName = (table.concat({prefix, name, suffix}):gsub("%s+$", ""))
+	self.nameTagRole = (tag:gsub("^%s*%[", ""):gsub("%]%s*$", ""))
 end
 function Vehicle:updateSpectatorsTagCache()
 	local owner = self:getOwner()
@@ -2740,6 +2744,8 @@ local function onPreRender(dt)
 
 
 				local roleInfo = v.customRole or owner.customRole or owner.role
+				-- modern nametags (opt in), false means draw the classic one this frame (not ready yet or out of sight)
+				if MPNametagsGE and MPNametagsGE.isActive() and MPNametagsGE.draw(serverVehicleID, v, owner, pos, distfloat, nametagAlpha, roleInfo) then goto skip_vehicle end
 				local backColor = color(roleInfo.backcolor.r, roleInfo.backcolor.g, roleInfo.backcolor.b, math.floor(nametagAlpha*127))
 				-- draw spectators
 				if settings.getValue("showSpectators") then
@@ -2763,10 +2769,10 @@ local function onPreRender(dt)
 					end
 				end
 				-- draw main nametag
-				local typing = MPPlayerStatusGE and MPPlayerStatusGE.isTyping(v.ownerID)
+				local statusSuffix = MPPlayerStatusGE and ((MPPlayerStatusGE.isTyping(v.ownerID) and typingSuffix) or (MPPlayerStatusGE.isAway(v.ownerID) and awaySuffix))
 				drawTextAdvanced(
 					pos.x, pos.y, pos.z, -- Location
-					typing and (v.nameTag .. dist .. typingSuffix) or (v.nameTag .. dist), -- Text
+					statusSuffix and (v.nameTag .. dist .. statusSuffix) or (v.nameTag .. dist), -- Text
 					color(255, 255, 255, nametagAlpha*254), -- Foreground Color, Alpha is multiplied by 254 because using 255 seems to break backround alpha in 0.37
 					true, -- Draw background 
 					false, -- Wtf
