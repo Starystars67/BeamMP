@@ -148,6 +148,22 @@ ul#chat-list {
     background: rgba(240, 169, 64, 0.22);
 }
 
+/* from a player we muted, click to read it */
+.chat-hidden-text {
+    font-style: italic;
+    opacity: 0.6;
+    cursor: pointer;
+}
+
+.chat-hidden-text:hover {
+    opacity: 0.9;
+    text-decoration: underline;
+}
+
+.chat-shown-text {
+    cursor: pointer;
+}
+
 /* new messages while we weren't looking */
 .chat-unread {
     align-self: center;

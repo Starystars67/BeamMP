@@ -104,6 +104,12 @@ local playersString = "" -- "player1,player2,player3"
 
 local chatcounter = 0
 
+local STATUS_INTERVAL = 0.5 -- seconds between player list status checks (typing, away, lagging)
+local mutedPlayers = {} -- [name] = true, only for this session
+local navigatingTo -- name of the player the ground markers are following
+local statusTimer = 0
+local sentStatus = ""
+
 --- Updates the loading information/message based on the provided data.
 -- @param data string The raw data message containing the code and message.
 local function updateLoading(data)
@@ -139,6 +145,19 @@ local function split(s, sep)
 end
 
 
+-- flags for the player list, only the ones that are set so it stays small
+local function playerFlags(name, player)
+	local flags = {}
+	if player and MPPlayerStatusGE then
+		if MPPlayerStatusGE.isTyping(player.playerID) then flags.typing = true end
+		if MPPlayerStatusGE.isAway(player.playerID) then flags.away = true end
+		if MPPlayerStatusGE.isLagging(player.playerID) then flags.lag = true end
+	end
+	if mutedPlayers[name] then flags.muted = true end
+	if navigatingTo == name then flags.navigating = true end
+	return flags
+end
+
 --- Update the players string used to create the player list in the UI when in a session.
 -- @param data string
 local function updatePlayersList(data)
@@ -156,12 +175,55 @@ local function updatePlayersList(data)
 			color = {[0] = c.r, [1] = c.g, [2] = c.b, [3] = c.a}
 			id = player.playerID
 		end
-		table.insert(playerListData, {name = p, formatted_name = username, color = color, id = id})
+		table.insert(playerListData, {name = p, formatted_name = username, color = color, id = id, flags = playerFlags(p, player)})
 	end
 	if not MPCoreNetwork.isMPSession() or tableIsEmpty(players) then return end
 	guihooks.trigger("onBeamMPPlayerList", jsonEncode(playerListData))
 	guihooks.trigger("onBeamMPPlayerPings", jsonEncode(pings))
 	playerListWindow.updatePlayerList(pings) -- Send pings because this is a key-value table that contains name and the ping
+end
+
+-- the server only sends the player list every few seconds, typing etc. needs to show sooner so it's sent on its own
+local function sendPlayerStatus(force)
+	local status = {}
+	for _, name in ipairs(split(playersString, ",")) do
+		local flags = playerFlags(name, MPVehicleGE.getPlayerByName(name))
+		if next(flags) then status[name] = flags end
+	end
+	local json = jsonEncode(status)
+	if json == sentStatus and not force then return end
+	sentStatus = json
+	guihooks.trigger("onBeamMPPlayerStatus", json)
+end
+
+--- Mutes or unmutes a player's chat messages for you, until you leave the server. Their messages still show as hidden
+--- and can be clicked to read.
+-- @tparam string name
+-- @tparam boolean muted
+local function mutePlayer(name, muted)
+	if type(name) ~= "string" or name == "" then return end
+	mutedPlayers[name] = muted and true or nil
+	sendPlayerStatus(true)
+end
+
+--- Returns if a player's chat messages are muted.
+-- @tparam string name
+-- @treturn boolean
+local function isMuted(name)
+	return mutedPlayers[name] == true
+end
+
+--- Sets the ground markers to follow a player, or stops if they're already being followed.
+-- @tparam string name
+local function navigateToPlayer(name)
+	if not name or navigatingTo == name then
+		navigatingTo = nil
+		MPVehicleGE.groundmarkerFollowPlayer(nil)
+	else
+		navigatingTo = name
+		MPVehicleGE.groundmarkerFollowPlayer(name)
+	end
+	sendPlayerStatus(true)
 end
 
 --- Used to tell the Ui of new status for the updates queue.
@@ -491,7 +553,8 @@ local function chatMessage(rawMessage) -- chat message received (angular)
 	local username = parts[1]
 	parts[1] = ''
 	local msg = string.gsub(message, username..': ', '')
-	local mention = isMention(username, msg)
+	local muted = mutedPlayers[username] or nil -- still sent, the chats show it as hidden with a click to read it
+	local mention = not muted and isMention(username, msg)
 	if mention and settings.getValue("chatMentionSound") ~= false then
 		Engine.Audio.playOnce('AudioGui', 'event:>UI>Missions>Info_Open')
 	end
@@ -501,14 +564,14 @@ local function chatMessage(rawMessage) -- chat message received (angular)
 		local c = player.role.forecolor
 		local color = {[0] = c.r, [1] = c.g, [2] = c.b, [3] = c.a}
 		log('M', 'chatMessage', 'Chat message received from: '..username..' >' ..msg) -- DO NOT REMOVE
-		guihooks.trigger("onBeamMPChatMessage", {username = username, message = message, id = chatcounter, color = color, mention = mention})
+		guihooks.trigger("onBeamMPChatMessage", {username = username, message = message, id = chatcounter, color = color, mention = mention, muted = muted})
 		-- For IMGUI
-		chatWindow.addMessage(username, msg, chatcounter, color, mention)
+		chatWindow.addMessage(username, msg, chatcounter, color, mention, muted)
 	else
 		log('M', 'chatMessage', 'Chat message received from: '..username.. ' >' ..msg) -- DO NOT REMOVE
-		guihooks.trigger("onBeamMPChatMessage", {username = username, message = message, id = chatcounter, mention = mention})
+		guihooks.trigger("onBeamMPChatMessage", {username = username, message = message, id = chatcounter, mention = mention, muted = muted})
 		-- For IMGUI
-		chatWindow.addMessage(username, msg, chatcounter, nil, mention)
+		chatWindow.addMessage(username, msg, chatcounter, nil, mention, muted)
 	end
 	TriggerClientEvent("ChatMessageReceived", message, username) -- Username added last to not break other mods.
 end
@@ -550,8 +613,14 @@ end
 -- @param mission table The mission object.
 local function onClientEndMission(mission)
     pings = {}
+	mutedPlayers, navigatingTo, sentStatus = {}, nil, ""
     chatWindow.chatMessages = {}
     chatWindow.clearHistory()
+end
+
+-- mutes are only for the session
+local function onDisconnect()
+	mutedPlayers, navigatingTo, sentStatus = {}, nil, ""
 end
 
 local function fixOldHUDLayout()
@@ -607,6 +676,13 @@ end
 -- This is the main processing thread of BeamMP in the game
 -- @param dt float
 local function onUpdate(dtReal,dtSim,dtRaw)
+	if MPCoreNetwork and MPCoreNetwork.isMPSession() then
+		statusTimer = statusTimer + dtReal
+		if statusTimer >= STATUS_INTERVAL then
+			statusTimer = 0
+			sendPlayerStatus()
+		end
+	end
     if worldReadyState ~= 2 or not settings.getValue("enableNewChatMenu") or not initialized or not M.canRender or MPCoreNetwork and not MPCoreNetwork.isMPSession() then return end
     renderWindow(dtRaw)
 end
@@ -697,7 +773,13 @@ M.clearPauseMenuModButtons = clearPauseMenuModButtons
 M.bringToFront = bringToFront
 M.toggleChat = toggleChat
 
+M.mutePlayer = mutePlayer
+M.isMuted = isMuted
+M.navigateToPlayer = navigateToPlayer
+M.sendPlayerStatus = sendPlayerStatus
+
 M.onClientEndMission = onClientEndMission
+M.onDisconnect = onDisconnect
 M.onExtensionLoaded = onExtensionLoaded
 M.onUpdate = onUpdate
 M.onInit = function() setExtensionUnloadMode(M, "manual") end

@@ -116,9 +116,30 @@ table#players-table > tbody > tr:nth-child(even) {
     width: auto;			
 }
 .playerslist-col-3 {
-    width: 64px;
+    width: 84px; /* fits "999 ms" */
 }
 #plist-container::-webkit-scrollbar {
     width: 0px;  /* Remove scrollbar space */
     background: transparent;  /* Optional: just make scrollbar invisible */
+}
+
+/* ping colors, green / amber / red */
+.beammpPlayerList .tp-button.ping-good {
+    color: #6fcf7c;
+}
+.beammpPlayerList .tp-button.ping-ok {
+    color: #f0a940;
+}
+.beammpPlayerList .tp-button.ping-bad {
+    color: #ef5f5f;
+}
+
+/* typing, away, lagging, muted, navigating */
+.player-status {
+    margin-left: 4px;
+    opacity: 0.8;
+    font-size: 0.9em;
+}
+.player-status-lag {
+    color: #f0a940;
 }
