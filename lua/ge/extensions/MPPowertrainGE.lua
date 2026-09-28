@@ -40,10 +40,11 @@ end
 -- @param data table The data to be applied as powertrain
 -- @param serverVehicleID string The VehicleID according to the server.
 local function applyLivePowertrain(data, serverVehicleID)
+	if MPVehiclePoolGE and MPVehiclePoolGE.intercept(serverVehicleID, "pl", data) then return end
 	local gameVehicleID = MPVehicleGE.getGameVehicleID(serverVehicleID) or -1 -- get gameID
 	local veh = getObjectByID(gameVehicleID)
 	if veh then
-		veh:queueLuaCommand("MPPowertrainVE.applyLivePowertrain(mime.unb64(\'".. MPHelpers.b64encode(data) .."\'))")
+		veh:queueLuaCommand("if MPPowertrainVE then MPPowertrainVE.applyLivePowertrain(mime.unb64(\'".. MPHelpers.b64encode(data) .."\')) end")
 	end
 end
 
@@ -59,10 +60,11 @@ end
 
 
 local function applyEngineData(data, serverVehicleID)
+	if MPVehiclePoolGE and MPVehiclePoolGE.intercept(serverVehicleID, "pe", data) then return end
 	local gameVehicleID = MPVehicleGE.getGameVehicleID(serverVehicleID) or -1 -- get gameID
 	local veh = getObjectByID(gameVehicleID)
 	if veh then
-		veh:queueLuaCommand("MPPowertrainVE.applyEngineData(mime.unb64(\'".. MPHelpers.b64encode(data) .."\'))")
+		veh:queueLuaCommand("if MPPowertrainVE then MPPowertrainVE.applyEngineData(mime.unb64(\'".. MPHelpers.b64encode(data) .."\')) end")
 	end
 end
 
@@ -78,10 +80,11 @@ end
 
 
 local function applyHydroBeams(data, serverVehicleID)
+	if MPVehiclePoolGE and MPVehiclePoolGE.intercept(serverVehicleID, "ph", data) then return end
 	local gameVehicleID = MPVehicleGE.getGameVehicleID(serverVehicleID) or -1
 	local veh = getObjectByID(gameVehicleID)
 	if veh then
-		veh:queueLuaCommand("MPPowertrainHydrosVE.applyHydroBeams(mime.unb64(\'".. MPHelpers.b64encode(data) .."\'))")
+		veh:queueLuaCommand("if MPPowertrainHydrosVE then MPPowertrainHydrosVE.applyHydroBeams(mime.unb64(\'".. MPHelpers.b64encode(data) .."\')) end")
 	end
 end
 
@@ -116,6 +119,9 @@ M.handle                 = handle
 M.sendLivePowertrain     = sendLivePowertrain
 M.sendEngineData		 = sendEngineData
 M.sendHydroBeamData = sendHydroBeamData
+M.applyLivePowertrain = applyLivePowertrain
+M.applyEngineData     = applyEngineData
+M.applyHydroBeams     = applyHydroBeams
 M.onInit = function() setExtensionUnloadMode(M, "manual") end
 
 

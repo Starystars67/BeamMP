@@ -27,6 +27,7 @@ local function sendControllerData(data, gameVehicleID)
 end
 
 local function applyControllerData(data, serverVehicleID)
+	if MPVehiclePoolGE and MPVehiclePoolGE.intercept(serverVehicleID, "c", data) then return end
 	local gameVehicleID = MPVehicleGE.getGameVehicleID(serverVehicleID) or -1
 	local veh = getObjectByID(gameVehicleID)
 	if veh then
@@ -37,7 +38,7 @@ local function applyControllerData(data, serverVehicleID)
 			decodedData.vehID = MPVehicleGE.getGameVehicleID(decodedData.vehID)
 		end
 		data = jsonEncode(decodedData)
-		veh:queueLuaCommand("controllerSyncVE.applyControllerData(mime.unb64(\'".. MPHelpers.b64encode(data) .."\'))")
+		veh:queueLuaCommand("if controllerSyncVE then controllerSyncVE.applyControllerData(mime.unb64(\'".. MPHelpers.b64encode(data) .."\')) end")
 	end
 end
 

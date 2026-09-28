@@ -104,6 +104,14 @@ local playersString = "" -- "player1,player2,player3"
 
 local chatcounter = 0
 
+local STATUS_INTERVAL = 0.5 -- seconds between player list status checks (typing, away, lagging)
+local mutedPlayers = {} -- [name] = true, only for this session
+local blockedPlayers = {} -- [name] = true, only for this session: vehicles, nametag, maps and chat hidden
+local blockedCount = 0
+local navigatingTo -- name of the player the ground markers are following
+local statusTimer = 0
+local sentStatus = ""
+
 --- Updates the loading information/message based on the provided data.
 -- @param data string The raw data message containing the code and message.
 local function updateLoading(data)
@@ -139,6 +147,20 @@ local function split(s, sep)
 end
 
 
+-- flags for the player list, only the ones that are set so it stays small
+local function playerFlags(name, player)
+	local flags = {}
+	if player and MPPlayerStatusGE then
+		if MPPlayerStatusGE.isTyping(player.playerID) then flags.typing = true end
+		if MPPlayerStatusGE.isAway(player.playerID) then flags.away = true end
+		if MPPlayerStatusGE.isLagging(player.playerID) then flags.lag = true end
+	end
+	if mutedPlayers[name] then flags.muted = true end
+	if blockedPlayers[name] then flags.blocked = true end
+	if navigatingTo == name then flags.navigating = true end
+	return flags
+end
+
 --- Update the players string used to create the player list in the UI when in a session.
 -- @param data string
 local function updatePlayersList(data)
@@ -156,12 +178,87 @@ local function updatePlayersList(data)
 			color = {[0] = c.r, [1] = c.g, [2] = c.b, [3] = c.a}
 			id = player.playerID
 		end
-		table.insert(playerListData, {name = p, formatted_name = username, color = color, id = id})
+		table.insert(playerListData, {name = p, formatted_name = username, color = color, id = id, flags = playerFlags(p, player)})
 	end
 	if not MPCoreNetwork.isMPSession() or tableIsEmpty(players) then return end
 	guihooks.trigger("onBeamMPPlayerList", jsonEncode(playerListData))
 	guihooks.trigger("onBeamMPPlayerPings", jsonEncode(pings))
 	playerListWindow.updatePlayerList(pings) -- Send pings because this is a key-value table that contains name and the ping
+end
+
+-- the server only sends the player list every few seconds, typing etc. needs to show sooner so it's sent on its own
+local function sendPlayerStatus(force)
+	local status = {}
+	for _, name in ipairs(split(playersString, ",")) do
+		local flags = playerFlags(name, MPVehicleGE.getPlayerByName(name))
+		if next(flags) then status[name] = flags end
+	end
+	local json = jsonEncode(status)
+	if json == sentStatus and not force then return end
+	sentStatus = json
+	guihooks.trigger("onBeamMPPlayerStatus", json)
+end
+
+--- Mutes or unmutes a player's chat messages for you, until you leave the server. Their messages still show as hidden
+--- and can be clicked to read.
+-- @tparam string name
+-- @tparam boolean muted
+local function mutePlayer(name, muted)
+	if type(name) ~= "string" or name == "" then return end
+	mutedPlayers[name] = muted and true or nil
+	sendPlayerStatus(true)
+end
+
+--- Returns if a player's chat messages are muted.
+-- @tparam string name
+-- @treturn boolean
+local function isMuted(name)
+	return mutedPlayers[name] == true
+end
+
+--- Blocks or unblocks a player for you, until you leave the server. Their vehicles are switched off (hidden, no
+--- collisions), their nametag and map markers go, and their chat messages only show as a count.
+-- @tparam string name
+-- @tparam boolean blocked
+local function blockPlayer(name, blocked)
+	if type(name) ~= "string" or name == "" or name == MPConfig.getNickname() then return end
+	blocked = blocked and true or nil
+	if blockedPlayers[name] == blocked then return end
+	blockedPlayers[name] = blocked
+	blockedCount = blockedCount + (blocked and 1 or -1)
+	if blocked and navigatingTo == name then
+		navigatingTo = nil
+		MPVehicleGE.groundmarkerFollowPlayer(nil)
+	end
+	if not blocked and MPVehiclePoolGE then MPVehiclePoolGE.wakePlayer(name) end -- blocking is picked up next frame
+	if MPMapPlayersGE then MPMapPlayersGE.refresh() end
+	sendPlayerStatus(true)
+end
+
+--- Returns if a player is blocked.
+-- @tparam string name
+-- @treturn boolean
+local function isBlocked(name)
+	return blockedPlayers[name] == true
+end
+
+--- Returns if anyone is blocked, so the per frame checks can be skipped.
+-- @treturn boolean
+local function hasBlocked()
+	return blockedCount > 0
+end
+
+--- Sets the ground markers to follow a player, or stops if they're already being followed.
+-- @tparam string name
+local function navigateToPlayer(name)
+	if not name or navigatingTo == name or blockedPlayers[name] then
+		navigatingTo = nil
+		MPVehicleGE.groundmarkerFollowPlayer(nil)
+	else
+		navigatingTo = name
+		MPVehicleGE.groundmarkerFollowPlayer(name)
+	end
+	sendPlayerStatus(true)
 end
 
 --- Used to tell the Ui of new status for the updates queue.
@@ -329,7 +426,7 @@ local function renderWindow(dtRaw)
         if currentWindow == windows.chat then
             local msgCount = windows.chat.newMessageCount
             if msgCount > 0 then
-                windowTitle = "BeamMP Chat (" .. tostring(msgCount) .. ')'
+                windowTitle = "BeamMP Chat (" .. tostring(msgCount) .. (windows.chat.newMentionCount > 0 and (" · @" .. windows.chat.newMentionCount) or "") .. ')'
             else
                 windowTitle = "BeamMP Chat"
             end
@@ -467,6 +564,23 @@ end
 --- Function is for when the game receives a new chat message from the server. 
 -- This is for handling the raw chat message
 -- @param rawMessage string The raw chat message with header codes
+--- Returns if a chat message mentions us: our name as a whole word, with or without an @, from someone else.
+-- @tparam string username who sent it
+-- @tparam string msg the message
+-- @treturn boolean
+local function isMention(username, msg)
+	local nick = MPConfig.getNickname()
+	if not nick or nick == "" or username == nick then return false end
+	local text, name = msg:lower(), nick:lower()
+	local s, e = text:find(name, 1, true)
+	while s do
+		local before, after = text:sub(s - 1, s - 1), text:sub(e + 1, e + 1)
+		if not before:match("[%w_]") and not after:match("[%w_]") then return true end -- not part of a longer word
+		s, e = text:find(name, e + 1, true)
+	end
+	return false
+end
+
 local function chatMessage(rawMessage) -- chat message received (angular)
 	chatcounter = chatcounter+1
 	local message = string.sub(rawMessage, 2)
@@ -474,20 +588,33 @@ local function chatMessage(rawMessage) -- chat message received (angular)
 	local username = parts[1]
 	parts[1] = ''
 	local msg = string.gsub(message, username..': ', '')
+	if blockedPlayers[username] then
+		-- only a count shows, "2 messages from a blocked player"
+		log('M', 'chatMessage', 'Chat message received from blocked player: '..username..' >' ..msg) -- DO NOT REMOVE
+		guihooks.trigger("onBeamMPChatMessage", {username = "", message = "", id = chatcounter, blocked = true})
+		chatWindow.addBlockedMessage()
+		TriggerClientEvent("ChatMessageReceived", message, username)
+		return
+	end
+	local muted = mutedPlayers[username] or nil -- still sent, the chats show it as hidden with a click to read it
+	local mention = not muted and isMention(username, msg)
+	if mention and settings.getValue("chatMentionSound") ~= false then
+		Engine.Audio.playOnce('AudioGui', 'event:>UI>Missions>Info_Open')
+	end
 	local player = MPVehicleGE.getPlayerByName(username)
 	if player then
         username = username .. player.role.shorttag
 		local c = player.role.forecolor
 		local color = {[0] = c.r, [1] = c.g, [2] = c.b, [3] = c.a}
 		log('M', 'chatMessage', 'Chat message received from: '..username..' >' ..msg) -- DO NOT REMOVE
-		guihooks.trigger("onBeamMPChatMessage", {username = username, message = message, id = chatcounter, color = color})
+		guihooks.trigger("onBeamMPChatMessage", {username = username, message = message, id = chatcounter, color = color, mention = mention, muted = muted})
 		-- For IMGUI
-		chatWindow.addMessage(username, msg, chatcounter, color)
+		chatWindow.addMessage(username, msg, chatcounter, color, mention, muted)
 	else
 		log('M', 'chatMessage', 'Chat message received from: '..username.. ' >' ..msg) -- DO NOT REMOVE
-		guihooks.trigger("onBeamMPChatMessage", {username = username, message = message, id = chatcounter})
+		guihooks.trigger("onBeamMPChatMessage", {username = username, message = message, id = chatcounter, mention = mention, muted = muted})
 		-- For IMGUI
-		chatWindow.addMessage(username, msg, id)
+		chatWindow.addMessage(username, msg, chatcounter, nil, mention, muted)
 	end
 	TriggerClientEvent("ChatMessageReceived", message, username) -- Username added last to not break other mods.
 end
@@ -496,6 +623,7 @@ end
 --- Sends a chat message to the server for viewing by other players.
 -- @param msg string The chat message typed by the user
 local function chatSend(msg)
+	if MPPlayerStatusGE then MPPlayerStatusGE.setTyping(false) end
 	local c = 'C:'..MPConfig.getNickname()..": "..msg
 	MPGameNetwork.send(c)
 	TriggerClientEvent("ChatMessageSent", c)
@@ -528,8 +656,14 @@ end
 -- @param mission table The mission object.
 local function onClientEndMission(mission)
     pings = {}
+	mutedPlayers, blockedPlayers, blockedCount, navigatingTo, sentStatus = {}, {}, 0, nil, ""
     chatWindow.chatMessages = {}
     chatWindow.clearHistory()
+end
+
+-- mutes and blocks are only for the session
+local function onDisconnect()
+	mutedPlayers, blockedPlayers, blockedCount, navigatingTo, sentStatus = {}, {}, 0, nil, ""
 end
 
 local function fixOldHUDLayout()
@@ -585,6 +719,13 @@ end
 -- This is the main processing thread of BeamMP in the game
 -- @param dt float
 local function onUpdate(dtReal,dtSim,dtRaw)
+	if MPCoreNetwork and MPCoreNetwork.isMPSession() then
+		statusTimer = statusTimer + dtReal
+		if statusTimer >= STATUS_INTERVAL then
+			statusTimer = 0
+			sendPlayerStatus()
+		end
+	end
     if worldReadyState ~= 2 or not settings.getValue("enableNewChatMenu") or not initialized or not M.canRender or MPCoreNetwork and not MPCoreNetwork.isMPSession() then return end
     renderWindow(dtRaw)
 end
@@ -675,7 +816,16 @@ M.clearPauseMenuModButtons = clearPauseMenuModButtons
 M.bringToFront = bringToFront
 M.toggleChat = toggleChat
 
+M.mutePlayer = mutePlayer
+M.isMuted = isMuted
+M.blockPlayer = blockPlayer
+M.isBlocked = isBlocked
+M.hasBlocked = hasBlocked
+M.navigateToPlayer = navigateToPlayer
+M.sendPlayerStatus = sendPlayerStatus
+
 M.onClientEndMission = onClientEndMission
+M.onDisconnect = onDisconnect
 M.onExtensionLoaded = onExtensionLoaded
 M.onUpdate = onUpdate
 M.onInit = function() setExtensionUnloadMode(M, "manual") end

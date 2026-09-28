@@ -46,6 +46,9 @@ setExtensionUnloadMode("MPConfig", "manual")
 load("MPGameNetwork")
 setExtensionUnloadMode("MPGameNetwork", "manual")
 
+load("MPKeybindsGE")
+setExtensionUnloadMode("MPKeybindsGE", "manual")
+
 load("MPVehicleGE")
 setExtensionUnloadMode("MPVehicleGE", "manual")
 
@@ -64,11 +67,23 @@ setExtensionUnloadMode("MPPowertrainGE", "manual")
 load("MPUpdatesGE")
 setExtensionUnloadMode("MPUpdatesGE", "manual")
 
+load("MPPlayerStatusGE")
+setExtensionUnloadMode("MPPlayerStatusGE", "manual")
+
+load("MPNametagsGE")
+setExtensionUnloadMode("MPNametagsGE", "manual")
+
+load("MPMapPlayersGE")
+setExtensionUnloadMode("MPMapPlayersGE", "manual")
+
 load("nodesGE")
 setExtensionUnloadMode("nodesGE", "manual")
 
 load("MPControllerGE")
 setExtensionUnloadMode("MPControllerGE", "manual")
+
+load("MPVehiclePoolGE")
+setExtensionUnloadMode("MPVehiclePoolGE", "manual")
 
 -- load this file last so it can reference the others
 load("MPHelpers")

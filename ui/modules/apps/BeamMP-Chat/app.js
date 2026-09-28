@@ -54,6 +54,10 @@ app.controller("BeamMPChatController", ['$scope', 'Settings', function ($scope, 
 			chatinput.addEventListener("mouseover", function(){ chatShown = true; showChat(); });
 			chatinput.addEventListener("mouseout", function(){ chatShown = false; });
 			chatinput.addEventListener('keydown', onKeyDown); //used for 'up arrow' last msg functionality
+			chatinput.addEventListener('input', updateTyping); // typing indicator above our nametag for everyone else
+			chatinput.addEventListener('focus', updateTyping);
+			chatinput.addEventListener('focus', clearUnread);
+			chatinput.addEventListener('blur', updateTyping);
 		}
 
 		var chatlist = document.getElementById("chat-list");
@@ -75,7 +79,8 @@ app.controller("BeamMPChatController", ['$scope', 'Settings', function ($scope, 
 
 		if (chatMessages) {
 			chatMessages.map((v, i) => {
-				addMessage(v.message, v.time)
+				if (v.blocked) addBlockedMessage(v.blocked, v.time, false)
+				else addMessage(v.message, v.time, v.mention, v.muted)
 			})
 		}
 
@@ -150,6 +155,7 @@ app.controller("BeamMPChatController", ['$scope', 'Settings', function ($scope, 
 	$scope.$on('onBeamMPChatMessage', function (event, data) {
 		if (data.id > lastMsgId) {
 			lastMsgId = data.id;
+			if (data.blocked) { addBlockedMessage(1, null, true); return; } // from a blocked player, only counted
 
 			var now = new Date();
 			var hour    = now.getHours();
@@ -161,8 +167,15 @@ app.controller("BeamMPChatController", ['$scope', 'Settings', function ($scope, 
 		
 			var time = hour + ":" + minute + ":" + second;
 			
-			storeChatMessage({message: data.message, time: time})
-			addMessage(data.message);
+			storeChatMessage({message: data.message, time: time, mention: data.mention, muted: data.muted})
+			addMessage(data.message, null, data.mention, data.muted);
+
+			// unread badge, for messages that come in while we're not looking at the chat
+			if (!chatShown && document.activeElement !== document.getElementById("chat-input")) {
+				unreadCount++;
+				if (data.mention) unreadMentions++;
+				updateUnread();
+			}
 		}
 	});
 
@@ -184,6 +197,15 @@ app.controller("BeamMPChatController", ['$scope', 'Settings', function ($scope, 
 		}
 	})
 
+	var isTyping = false;
+	function updateTyping() {
+		let chatinput = document.getElementById("chat-input");
+		const typing = !!chatinput && document.activeElement === chatinput && chatinput.value.trim() !== "";
+		if (typing === isTyping) return; // only tell GE when it changes
+		isTyping = typing;
+		bngApi.engineLua('if MPPlayerStatusGE then MPPlayerStatusGE.setTyping(' + typing + ') end');
+	}
+
 	$scope.chatSend = function() {
 		let chatinput = document.getElementById("chat-input");
 		const text = chatinput.value
@@ -193,6 +215,7 @@ app.controller("BeamMPChatController", ['$scope', 'Settings', function ($scope, 
 			else {
 				bngApi.engineLua('UI.chatSend(' + bngApi.serializeToLua(text) + ')');
 				chatinput.value = '';
+				updateTyping();
 			}
 		}
 	};
@@ -232,6 +255,7 @@ async function fadeNode(node) {
 
 async function showChat() {
 	if (newChatMenu) return;
+	clearUnread();
 
 	// While the mouse is over the chat, we wait
 	var chatMessages = []
@@ -352,6 +376,21 @@ function storeChatMessage(message) {
   }
 }
 
+// the blocked count is one stored message too, updated while it keeps going up
+function storeBlockedMessage(count, time) {
+	if (typeof(Storage) === "undefined") return;
+	let chatMessages = JSON.parse(localStorage.getItem("chatMessages")) || [];
+	const last = chatMessages[chatMessages.length - 1];
+	if (last && last.blocked) {
+		last.blocked = count;
+		last.time = time;
+	} else {
+		chatMessages.push({ blocked: count, time: time });
+		if (chatMessages.length > 70) chatMessages.shift();
+	}
+	localStorage.setItem("chatMessages", JSON.stringify(chatMessages));
+}
+
 function retrieveChatMessages() {
 	// Check if localStorage is available
 	if (typeof localStorage !== 'undefined') {
@@ -365,7 +404,28 @@ function retrieveChatMessages() {
 	}
 }
 
-function addMessage(msg, time = null) {
+var unreadCount = 0;
+var unreadMentions = 0;
+
+function updateUnread() {
+	const badge = document.getElementById("chat-unread");
+	if (!badge) return;
+	if (unreadCount > 0) {
+		badge.textContent = unreadMentions > 0 ? unreadCount + " · @" + unreadMentions : "" + unreadCount;
+		badge.classList.toggle("chat-unread-mention", unreadMentions > 0);
+		badge.style.display = "";
+	} else {
+		badge.style.display = "none";
+	}
+}
+
+function clearUnread() {
+	unreadCount = 0;
+	unreadMentions = 0;
+	updateUnread();
+}
+
+function addMessage(msg, time = null, mention = false, muted = false) {
 	//getting current time and adding it to the message before displaying
 	if (time == null) {
 		var now = new Date();
@@ -384,7 +444,7 @@ function addMessage(msg, time = null) {
 
 	// Create the message node
 	const chatMessageNode = document.createElement("li");
-	chatMessageNode.className = "chat-message";
+	chatMessageNode.className = mention ? "chat-message chat-message-mention" : (muted ? "chat-message chat-message-hidden" : "chat-message");
 	fadeNode(chatMessageNode);
 
 	// create node for the timestamp
@@ -401,7 +461,29 @@ function addMessage(msg, time = null) {
 
 	// check if this message is a server message before
 	// doing rich formatting
-	if (msgText.startsWith("Server: ")) {
+	if (muted) {
+		// a player we muted, show who it's from and let it be clicked to read it
+		const sep = msgText.indexOf(": ");
+		const nameNode = document.createTextNode(sep >= 0 ? msgText.substring(0, sep + 2) : "");
+		const hiddenNode = document.createElement("span");
+		hiddenNode.className = "chat-hidden-text";
+		hiddenNode.textContent = "hidden message, click to show";
+		const shownNode = document.createElement("span");
+		shownNode.className = "chat-shown-text";
+		shownNode.title = "Click to hide";
+		shownNode.textContent = sep >= 0 ? msgText.substring(sep + 2) : msgText;
+		// click to read it, click again to hide it
+		hiddenNode.onclick = function() {
+			hiddenNode.replaceWith(shownNode);
+			chatMessageNode.classList.remove("chat-message-hidden");
+		};
+		shownNode.onclick = function() {
+			shownNode.replaceWith(hiddenNode);
+			chatMessageNode.classList.add("chat-message-hidden");
+		};
+		chatMessageNode.appendChild(nameNode);
+		chatMessageNode.appendChild(hiddenNode);
+	} else if (msgText.startsWith("Server: ")) {
 		const formattedInnerHtml = formatChatMessage(msgText);
 		chatMessageNode.innerHTML = chatMessageNode.innerHTML + formattedInnerHtml;
 	} else {
@@ -418,6 +500,37 @@ function addMessage(msg, time = null) {
 	
 	scrollToLastMessage();
 
+}
+
+// one line that counts messages from blocked players, "3 messages from a blocked player"
+// adds `add` to the count, `store` saves it so it's still there after a UI reload
+function addBlockedMessage(add, time, store) {
+	const chatList = document.getElementById("chat-list");
+	let node = chatList.lastElementChild;
+	if (!node || !node.dataset.blockedCount) {
+		node = document.createElement("li");
+		node.className = "chat-message chat-message-blocked";
+		node.dataset.blockedCount = "0";
+		const timestampNode = document.createElement("span");
+		timestampNode.className = "chat-message-timestamp";
+		const textNode = document.createElement("span");
+		textNode.className = "chat-hidden-text";
+		node.appendChild(timestampNode);
+		node.appendChild(textNode);
+		chatList.appendChild(node);
+		if (chatList.children.length > 70) chatList.removeChild(chatList.children[0]);
+	}
+	const count = Number(node.dataset.blockedCount) + add;
+	node.dataset.blockedCount = String(count);
+	if (!time) {
+		const now = new Date();
+		time = [now.getHours(), now.getMinutes(), now.getSeconds()].map((n) => String(n).padStart(2, "0")).join(":");
+	}
+	node.firstChild.textContent = time;
+	if (store) storeBlockedMessage(count, time);
+	node.lastChild.textContent = count === 1 ? "1 message from a blocked player" : count + " messages from a blocked player";
+	fadeNode(node);
+	scrollToLastMessage();
 }
 
 function scrollToLastMessage() {

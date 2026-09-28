@@ -69,10 +69,11 @@ end
 -- @param data table The data to be applied as nodes
 -- @param serverVehicleID string The VehicleID according to the server.
 local function applyNodes(data, serverVehicleID)
+	if MPVehiclePoolGE and MPVehiclePoolGE.intercept(serverVehicleID, "n", data) then return end
 	local gameVehicleID = MPVehicleGE.getGameVehicleID(serverVehicleID) or -1
 	local veh = getObjectByID(gameVehicleID)
 	if veh then
-		veh:queueLuaCommand("nodesVE.applyNodes(mime.unb64(\'".. MPHelpers.b64encode(data) .."\'))")
+		veh:queueLuaCommand("if nodesVE then nodesVE.applyNodes(mime.unb64(\'".. MPHelpers.b64encode(data) .."\')) end")
 	end
 end
 
@@ -81,10 +82,11 @@ end
 -- @param data table The data to be applied as break groups
 -- @param serverVehicleID string The VehicleID according to the server.
 local function applyBreakGroups(data, serverVehicleID)
+	if MPVehiclePoolGE and MPVehiclePoolGE.intercept(serverVehicleID, "g", data) then return end
 	local gameVehicleID = MPVehicleGE.getGameVehicleID(serverVehicleID) or -1
 	local veh = getObjectByID(gameVehicleID)
 	if veh then
-		veh:queueLuaCommand("nodesVE.applyBreakGroups(mime.unb64(\'".. MPHelpers.b64encode(data) .."\'))")
+		veh:queueLuaCommand("if nodesVE then nodesVE.applyBreakGroups(mime.unb64(\'".. MPHelpers.b64encode(data) .."\')) end")
 	end
 end
 
@@ -120,6 +122,7 @@ M.applyNodes = applyNodes
 M.onInit = function() setExtensionUnloadMode(M, "manual") end
 
 M.sendBreakGroups  = sendBreakGroups
+M.applyBreakGroups = applyBreakGroups
 M.sendControllerData  = sendControllerData
 
 return M

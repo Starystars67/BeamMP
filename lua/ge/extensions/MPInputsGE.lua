@@ -41,10 +41,11 @@ end
 -- @param data table The data to be applied as inputs
 -- @param serverVehicleID string The VehicleID according to the server.
 local function applyInputs(data, serverVehicleID)
+	if MPVehiclePoolGE and MPVehiclePoolGE.intercept(serverVehicleID, "i", data) then return end
 	local gameVehicleID = MPVehicleGE.getGameVehicleID(serverVehicleID) or -1 -- get gameID
 	local veh = getObjectByID(gameVehicleID)
 	if veh then
-		veh:queueLuaCommand("MPInputsVE.applyInputs(mime.unb64(\'".. MPHelpers.b64encode(data) .."\'))")
+		veh:queueLuaCommand("if MPInputsVE then MPInputsVE.applyInputs(mime.unb64(\'".. MPHelpers.b64encode(data) .."\')) end")
 	end
 end
 

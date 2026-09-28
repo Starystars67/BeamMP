@@ -5,6 +5,7 @@
         <ul id="chat-list"></ul>
         <form id="chatbox">
 			<button id="send-button" type="button" class="buttons" ng-click="chatSend()" title="Send message" aria-label="Send message">Send</button>
+			<span id="chat-unread" class="chat-unread" style="display: none" title="New messages"></span>
 			<input id="chat-input" type="text" maxlength="500" autocomplete="off" ng-click="select()" placeholder="Chat here" aria-label="beammp chat message">
 			<button id="chat-horizontal-button" type="button" class="buttons swap-buttons" ng-click="chatSwapHorizontal()" title="Move chat horizontally" aria-label="Move chat horizontally">↔</button>
 			<button id="chat-vertical-button" type="button" class="buttons swap-buttons" ng-click="chatSwapVertical()" title="Move chat vertically" aria-label="Move chat vertically">↕</button>

@@ -129,6 +129,36 @@ app.controller("BeamMPPlayerListController", ['$scope', '$filter', 'Settings', f
 	})
 
 	var customButtons = []
+	var statusByName = {} // typing / away / lag / muted / navigating, sent more often than the player list
+
+	// small icons after the name, the rows are rebuilt with every player list so this runs after that too
+	function applyStatus() {
+		var spans = document.querySelectorAll(".player-status-wrap");
+		for (let i = 0; i < spans.length; i++) {
+			var flags = statusByName[spans[i].dataset.name] || {};
+			var html = "";
+			if (flags.typing) html += '<span class="player-status" title="Typing">…</span>';
+			if (flags.away) html += '<span class="player-status" title="Away">☾</span>';
+			if (flags.lag) html += '<span class="player-status player-status-lag" title="Lagging">⚠</span>';
+			if (flags.blocked) html += '<span class="player-status player-status-blocked" title="Blocked">⊗</span>';
+			else if (flags.muted) html += '<span class="player-status" title="Muted">⊘</span>';
+			if (flags.navigating) html += '<span class="player-status" title="Navigating to">➤</span>';
+			spans[i].innerHTML = html;
+		}
+	}
+
+	function pingClass(ping) {
+		var ms = Number(ping);
+		if (!isFinite(ms)) return "ping-unknown";
+		if (ms < 100) return "ping-good";
+		if (ms < 250) return "ping-ok";
+		return "ping-bad";
+	}
+
+	$scope.$on('onBeamMPPlayerStatus', function(event, data) {
+		try { statusByName = JSON.parse(data) || {}; } catch (e) { statusByName = {}; }
+		applyStatus();
+	})
 
 	$scope.$on('onBeamMPUpdateCustomButtons', function(event, data) {
 		if (Array.isArray(data)) {
@@ -181,6 +211,11 @@ app.controller("BeamMPPlayerListController", ['$scope', '$filter', 'Settings', f
 				// Insert a cell containing the player name
 				var nameCell = row.insertCell(1);
 				nameCell.textContent = parsedList[i].formatted_name;
+				var statusWrap = document.createElement("span");
+				statusWrap.className = "player-status-wrap";
+				statusWrap.dataset.name = parsedList[i].name;
+				nameCell.appendChild(statusWrap);
+				if (parsedList[i].flags && !statusByName[parsedList[i].name]) statusByName[parsedList[i].name] = parsedList[i].flags;
 				//var c = parsedList[i].color
 				//nameCell.style = `color:rgba(${c[0]},${c[1]},${c[2]},255)`;
 
@@ -264,6 +299,32 @@ app.controller("BeamMPPlayerListController", ['$scope', '$filter', 'Settings', f
 						playerlistContextmenu.style.display = "none";
 					}
 
+					// not for ourselves
+					var flags = statusByName[parsedList[i].name] || {};
+					var isSelf = parsedList[i].name === nickname;
+					var navigateButton = document.getElementById("pl-context-NavigateButton");
+					navigateButton.style.display = (isSelf || flags.blocked) ? "none" : "";
+					navigateButton.textContent = flags.navigating ? "Stop navigating" : "Navigate to";
+					navigateButton.onclick = function() {
+						bngApi.engineLua(`UI.navigateToPlayer(require("mime").unb64('` + btoa(parsedList[i].name) + `'))`);
+						playerlistContextmenu.style.display = "none";
+					}
+					document.getElementById("pl-context-SwitchCameraButton").style.display = flags.blocked ? "none" : "";
+					var muteButton = document.getElementById("pl-context-MuteButton");
+					muteButton.style.display = (isSelf || flags.blocked) ? "none" : "";
+					muteButton.textContent = flags.muted ? "Unmute chat" : "Mute chat";
+					muteButton.onclick = function() {
+						bngApi.engineLua(`UI.mutePlayer(require("mime").unb64('` + btoa(parsedList[i].name) + `'), ` + (flags.muted ? "false" : "true") + `)`);
+						playerlistContextmenu.style.display = "none";
+					}
+					var blockButton = document.getElementById("pl-context-BlockButton");
+					blockButton.style.display = isSelf ? "none" : "";
+					blockButton.textContent = flags.blocked ? "Unblock" : "Block";
+					blockButton.onclick = function() {
+						bngApi.engineLua(`UI.blockPlayer(require("mime").unb64('` + btoa(parsedList[i].name) + `'), ` + (flags.blocked ? "false" : "true") + `)`);
+						playerlistContextmenu.style.display = "none";
+					}
+
 					for (let child of playerlistContextmenu.children) {
 						if (child.id === "pl-context-custom") {
 							playerlistContextmenu.removeChild(child);
@@ -305,13 +366,14 @@ app.controller("BeamMPPlayerListController", ['$scope', '$filter', 'Settings', f
 				var pingText = pingList[parsedList[i].name] || "?";
 				btn.appendChild(document.createTextNode(`${pingText} ms`));
 				btn.setAttribute("onclick","teleportToPlayer('"+parsedList[i]+"')");
-				btn.setAttribute("class", "tp-button buttons");
+				btn.setAttribute("class", "tp-button buttons " + pingClass(pingList[parsedList[i].name]));
 				pingCell.appendChild(btn);
 
 				if ($scope.queuedPlayers[parsedList[i].id] == true) {
 					row.style.setProperty('background-color', 'var(--bng-orange-shade1)');
 				}
 			}
+			applyStatus();
 			if(document.getElementById("plist-container").style.display == "block")
 				document.getElementById("show-button").style.height = playersList.offsetHeight + "px"; 
 		}
@@ -344,7 +406,7 @@ app.controller("BeamMPPlayerListController", ['$scope', '$filter', 'Settings', f
 		}
 	})
 
-	bngApi.engineLua('UI.updatePlayersList(); UI.sendQueue()'); // instantly populate the playerlist and their queues
+	bngApi.engineLua('UI.updatePlayersList(); UI.sendQueue(); UI.sendPlayerStatus(true)'); // instantly populate the playerlist and their queues
 }]);
 
 

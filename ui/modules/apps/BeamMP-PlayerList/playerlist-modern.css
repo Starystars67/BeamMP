@@ -113,7 +113,7 @@
 }
 
 .beammpPlayerList .playerslist-col-3 {
-  width: 64px;
+  width: 84px; /* fits "999 ms" */
   padding: 0 !important;
   text-align: right !important;
 }

@@ -67,6 +67,8 @@ end
 
 -- debug drawers, using the FFI functions for debugDraw is a lot faster and produces no garbage
 local drawTextAdvanced = ffiFound and ffi.C.BNG_DBG_DRAW_TextAdvanced or nop
+local typingSuffix = "typing... " -- added to the nametag while that player is typing in chat
+local awaySuffix = "away " -- same while their game is out of focus
 local drawSphere = ffiFound and ffi.C.BNG_DBG_DRAW_Sphere or nop
 
 --- Contains Information about Backend authorized Roles
@@ -212,6 +214,8 @@ local vehiclesMap = {}
 -- @usage local distanceTo = distanceMap[11171]
 local distanceMap = {}
 
+local missingServerIDLogged = {} -- [gameVehicleID] = true, limits getServerVehicleID error spam
+
 -- decoded vehicle data of all players
 local players_vehicle_configs = {}
 
@@ -244,8 +248,12 @@ function getServerVehicleID(gameVehicleID)
 	end
 
 	if not vehiclesMap[gameVehicleID] or not vehicles[vehiclesMap[gameVehicleID]] then
-		log('E', 'getServerVehicleID', "can't get server id from " .. tostring(gameVehicleID))
-		log('M', 'getServerVehicleID', debug.traceback())
+		-- this is hit by every send path (up to 50 times a second) while a vehicle is waiting for its server id, so only log the traceback once per vehicle
+		if not missingServerIDLogged[gameVehicleID or "nil"] then
+			missingServerIDLogged[gameVehicleID or "nil"] = true
+			log('E', 'getServerVehicleID', "can't get server id from " .. tostring(gameVehicleID))
+			log('M', 'getServerVehicleID', debug.traceback())
+		end
 		return
 	end
 
@@ -1169,6 +1177,9 @@ function Vehicle:updateNameTagCache()
 		suffix = suffix..tag.." "
 	end
 	self.nameTag = String(" " .. table.concat({prefix, name, suffix, tag}) .. " ")
+	-- same parts on their own for the modern nametags, which show the role on its own line
+	self.nameTagName = (table.concat({prefix, name, suffix}):gsub("%s+$", ""))
+	self.nameTagRole = (tag:gsub("^%s*%[", ""):gsub("%]%s*$", ""))
 end
 function Vehicle:updateSpectatorsTagCache()
 	local owner = self:getOwner()
@@ -1521,6 +1532,8 @@ local function applyVehSpawn(event)
 	local spawnedVehID = getGameVehicleID(event.serverVehicleID)
 	local spawnedVeh = spawnedVehID and getObjectByID(spawnedVehID) or nil
 
+	if spawnedVeh and MPVehiclePoolGE then MPVehiclePoolGE.wake(event.serverVehicleID, true) end
+
 	if spawnedVeh then -- if a vehicle with this ID was found update the obj
 		log('W', 'applyVehSpawn', "(spawn)Updating vehicle from server "..vehicleName.." with id "..spawnedVehID)
 		spawn.setVehicleObject(spawnedVeh, {model=vehicleName, config=serialize(vehicleConfig), pos=pos, rot=rot, cling=true})
@@ -1565,6 +1578,8 @@ local function applyVehEdit(serverID, data)
 
 	local veh = getObjectByID(gameVehicleID) -- Get the vehicle
 	if not veh then log('E','applyVehEdit',"Vehicle "..gameVehicleID.." not found") return end
+
+	if MPVehiclePoolGE then MPVehiclePoolGE.wake(serverID, true) end -- edits may be applied from the queue long after the packet arrived
 
 	local decodedData   = jsonDecode(data) -- Decode the data
 	local vehicleName   = decodedData.jbm -- Vehicle name
@@ -2131,7 +2146,7 @@ local function onServerVehicleCoupled(serverVehicleID, data)
 	if not vehicle.isLocal then
 		local veh = getObjectByID(vehicle.gameVehicleID)
 		if veh then
-			veh:queueLuaCommand("couplerVE.toggleCouplerState(mime.unb64(\'".. MPHelpers.b64encode(data) .."\'))")
+			veh:queueLuaCommand("if couplerVE then couplerVE.toggleCouplerState(mime.unb64(\'".. MPHelpers.b64encode(data) .."\')) end")
 		end
 	end
 end
@@ -2263,6 +2278,12 @@ local HandleNetwork = {
 local function handle(rawData)
 	local code = string.sub(rawData, 1, 1)
 	local rawData = string.sub(rawData, 3)
+	if MPVehiclePoolGE and (code == 'r' or code == 't' or code == 'p') then
+		-- resets, couplers and paint of a culled vehicle are held and replayed in order when it wakes,
+		-- so players spamming reset far away don't keep their vehicle simulated (edits wake in applyVehEdit)
+		local serverVehicleID = string.match(rawData, "^(%d+%-%d+)")
+		if serverVehicleID and MPVehiclePoolGE.intercept(serverVehicleID, "O", code .. ":" .. rawData) then return end
+	end
 	if HandleNetwork[code] then
 		HandleNetwork[code](rawData)
 	else
@@ -2468,6 +2489,7 @@ local function focusCameraOnPlayer(targetName)
 
 			if vehicle.gameVehicleID ~= activeVehicleID and targetVeh then
 				log('I', "focusCameraOnPlayer", "Entering vehicle "..vehicle.gameVehicleID)
+				if MPVehiclePoolGE then MPVehiclePoolGE.wake(serverVehicleID, true) end
 				be:enterVehicle(0,targetVeh)
 				return
 			end
@@ -2641,6 +2663,7 @@ local function onPreRender(dt)
 			--playerCount = playerCount + 1
 			local owner = v:getOwner()
 			if v.isLocal or not owner then goto skip_vehicle end
+			if UI and UI.hasBlocked() and UI.isBlocked(owner.name) then goto skip_vehicle end -- no nametag or blob for blocked players
 			local gameVehicleID = v.gameVehicleID
 			local veh = getObjectByID(gameVehicleID)
 			local heightOffset = 0
@@ -2739,6 +2762,8 @@ local function onPreRender(dt)
 
 
 				local roleInfo = v.customRole or owner.customRole or owner.role
+				-- modern nametags (opt in), false means draw the classic one this frame (not ready yet or out of sight)
+				if MPNametagsGE and MPNametagsGE.isActive() and MPNametagsGE.draw(serverVehicleID, v, owner, pos, distfloat, nametagAlpha, roleInfo) then goto skip_vehicle end
 				local backColor = color(roleInfo.backcolor.r, roleInfo.backcolor.g, roleInfo.backcolor.b, math.floor(nametagAlpha*127))
 				-- draw spectators
 				if settings.getValue("showSpectators") then
@@ -2762,9 +2787,10 @@ local function onPreRender(dt)
 					end
 				end
 				-- draw main nametag
+				local statusSuffix = MPPlayerStatusGE and ((MPPlayerStatusGE.isTyping(v.ownerID) and typingSuffix) or (MPPlayerStatusGE.isAway(v.ownerID) and awaySuffix))
 				drawTextAdvanced(
 					pos.x, pos.y, pos.z, -- Location
-					v.nameTag .. dist, -- Text
+					statusSuffix and (v.nameTag .. dist .. statusSuffix) or (v.nameTag .. dist), -- Text
 					color(255, 255, 255, nametagAlpha*254), -- Foreground Color, Alpha is multiplied by 254 because using 255 seems to break backround alpha in 0.37
 					true, -- Draw background 
 					false, -- Wtf
@@ -2863,8 +2889,6 @@ local function onVehicleReady(gameVehicleID)
 	if vehiclesMap[gameVehicleID] then
 		veh:queueLuaCommand("MPVehicleVE.setServerID(mime.unb64(\'".. MPHelpers.b64encode(vehiclesMap[gameVehicleID]) .."\'))")
 	end
-
-	MPGameNetwork.onVehicleReady(gameVehicleID)
 end
 
 

@@ -50,9 +50,15 @@
 						</td>
 						<td class="player-button table-cell" @click.stop="handlePrimaryAction(player)">
 							{{ player.formatted_name || player.name }}
+							<span v-if="player.flags.typing" class="player-status" :title="$tt('ui.apps.beammp.playerlist.typing') || 'Typing'">…</span>
+							<span v-if="player.flags.away" class="player-status" :title="$tt('ui.apps.beammp.playerlist.away') || 'Away'">☾</span>
+							<span v-if="player.flags.lag" class="player-status player-status-lag" :title="$tt('ui.apps.beammp.playerlist.lagging') || 'Lagging'">⚠</span>
+							<span v-if="player.flags.blocked" class="player-status player-status-blocked" :title="$tt('ui.apps.beammp.playerlist.blocked') || 'Blocked'">⊗</span>
+							<span v-else-if="player.flags.muted" class="player-status" :title="$tt('ui.apps.beammp.playerlist.muted') || 'Muted'">⊘</span>
+							<span v-if="player.flags.navigating" class="player-status" :title="$tt('ui.apps.beammp.playerlist.navigating') || 'Navigating to'">➤</span>
 						</td>
 						<td class="ping-cell table-cell">
-							<button class="buttons tp-button" type="button" @click.stop>
+							<button class="buttons tp-button" :class="pingClass(player.ping)" type="button" @click.stop>
 								{{ formatPing(player.ping) }} ms
 							</button>
 						</td>
@@ -87,7 +93,7 @@
 			<button type="button" @click="applyQueuesForPlayer(contextMenu.player?.id)">
 				{{ $tt("ui.apps.beammp.playerlist.queueEvents") }}
 			</button>
-			<button type="button" @click="showPlayerInfo(contextMenu.player?.name)">
+			<button v-if="!contextMenu.player?.flags.blocked" type="button" @click="showPlayerInfo(contextMenu.player?.name)">
 				{{ $tt("ui.apps.beammp.playerlist.switchCameraTo") }}
 			</button>
 			<button type="button" @click="openProfile(contextMenu.player?.name)">
@@ -95,6 +101,15 @@
 			</button>
 			<button type="button" @click="restorePlayerVehicle(contextMenu.player?.name)">
 				{{ $tt("ui.apps.beammp.playerlist.restoreVehicles") }}
+			</button>
+			<button v-if="contextMenu.player?.name !== ownName && !contextMenu.player?.flags.blocked" type="button" @click="navigateToPlayer(contextMenu.player?.name)">
+				{{ contextMenu.player?.flags.navigating ? ($tt("ui.apps.beammp.playerlist.stopNavigating") || "Stop navigating") : ($tt("ui.apps.beammp.playerlist.navigateTo") || "Navigate to") }}
+			</button>
+			<button v-if="contextMenu.player?.name !== ownName && !contextMenu.player?.flags.blocked" type="button" @click="mutePlayer(contextMenu.player)">
+				{{ contextMenu.player?.flags.muted ? ($tt("ui.apps.beammp.playerlist.unmute") || "Unmute chat") : ($tt("ui.apps.beammp.playerlist.mute") || "Mute chat") }}
+			</button>
+			<button v-if="contextMenu.player?.name !== ownName" type="button" @click="blockPlayer(contextMenu.player)">
+				{{ contextMenu.player?.flags.blocked ? ($tt("ui.apps.beammp.playerlist.unblock") || "Unblock") : ($tt("ui.apps.beammp.playerlist.block") || "Block") }}
 			</button>
 			<button
 				v-for="label in customButtons"
@@ -121,6 +136,8 @@ const showPlayerIDs = ref(true)
 const playerlistLeftclick = ref(0)
 const useUiAppRedesign = ref(false)
 const pingByName = ref({})
+const statusByName = ref(null) // typing / away / lag / muted / navigating, sent more often than the player list
+const ownName = ref("")
 const isShown = ref(localStorage.getItem("plShown") === "1")
 const horizontal = ref(localStorage.getItem("plHorizontal") || "right")
 const vertical = ref(localStorage.getItem("plVertical") || "top")
@@ -182,6 +199,7 @@ function hydratePlayers(list) {
 	players.value = sortPlayers(list).map((player) => ({
 		...player,
 		ping: pingByName.value[player.name] ?? player.ping ?? "?",
+		flags: (statusByName.value ? statusByName.value[player.name] : player.flags) || {},
 	}))
 }
 
@@ -220,6 +238,32 @@ function openContextMenu(event, player) {
 
 function formatPing(ping) {
 	return ping === undefined || ping === null ? "?" : ping
+}
+
+function pingClass(ping) {
+	const ms = Number(ping)
+	if (!Number.isFinite(ms)) return "ping-unknown"
+	if (ms < 100) return "ping-good"
+	if (ms < 250) return "ping-ok"
+	return "ping-bad"
+}
+
+function navigateToPlayer(name) {
+	if (!name) return closeContextMenu()
+	api.engineLua(`UI.navigateToPlayer(${api.serializeToLua(String(name))})`)
+	closeContextMenu()
+}
+
+function blockPlayer(player) {
+	if (!player?.name) return closeContextMenu()
+	api.engineLua(`UI.blockPlayer(${api.serializeToLua(String(player.name))}, ${player.flags.blocked ? "false" : "true"})`)
+	closeContextMenu()
+}
+
+function mutePlayer(player) {
+	if (!player?.name) return closeContextMenu()
+	api.engineLua(`UI.mutePlayer(${api.serializeToLua(String(player.name))}, ${player.flags.muted ? "false" : "true"})`)
+	closeContextMenu()
 }
 
 function copyName(name) {
@@ -313,6 +357,12 @@ function onPlayerPings(payload) {
 	hydratePlayers(players.value)
 }
 
+function onPlayerStatus(payload) {
+	const parsed = typeof payload === "string" ? safeJsonParse(payload, {}) : payload
+	statusByName.value = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {}
+	hydratePlayers(players.value)
+}
+
 function onQueueUpdate(payload) {
 	const nextQueuedPlayers = payload?.queuedPlayers && typeof payload.queuedPlayers === "object"
 		? payload.queuedPlayers
@@ -356,6 +406,7 @@ onMounted(() => {
 	events.on("SettingsChanged", onSettingsChanged)
 	events.on("onBeamMPPlayerList", onPlayerList)
 	events.on("onBeamMPPlayerPings", onPlayerPings)
+	events.on("onBeamMPPlayerStatus", onPlayerStatus)
 	events.on("onBeamMPSetQueue", onQueueUpdate)
 	events.on("onBeamMPUpdateCustomButtons", onCustomButtons)
 
@@ -363,13 +414,17 @@ onMounted(() => {
 	window.addEventListener("click", closeContextMenu)
 
 	api.engineLua("guihooks.trigger('onBeamMPUpdateCustomButtons', UI.getCustomButtonNames())")
-	api.engineLua("UI.updatePlayersList(); UI.sendQueue()")
+	api.engineLua("UI.updatePlayersList(); UI.sendQueue(); UI.sendPlayerStatus(true)")
+	api.engineLua("MPConfig.getNickname()", (name) => {
+		ownName.value = name || ""
+	})
 })
 
 onUnmounted(() => {
 	events.off("SettingsChanged", onSettingsChanged)
 	events.off("onBeamMPPlayerList", onPlayerList)
 	events.off("onBeamMPPlayerPings", onPlayerPings)
+	events.off("onBeamMPPlayerStatus", onPlayerStatus)
 	events.off("onBeamMPSetQueue", onQueueUpdate)
 	events.off("onBeamMPUpdateCustomButtons", onCustomButtons)
 
@@ -515,7 +570,7 @@ onUnmounted(() => {
 }
 
 .playerslist-col-3 {
-	width: 64px;
+	width: 84px; /* fits "999 ms" */
 	padding: 0 !important;
 	text-align: right !important;
 }
@@ -563,6 +618,34 @@ onUnmounted(() => {
 	padding: 0 5px;
 	color: var(--bng-cool-gray-300);
 	font-variant-numeric: tabular-nums;
+}
+
+/* ping colors, green / amber / red */
+.tp-button.ping-good {
+	color: #6fcf7c;
+}
+
+.tp-button.ping-ok {
+	color: #f0a940;
+}
+
+.tp-button.ping-bad {
+	color: #ef5f5f;
+}
+
+/* typing, away, lagging, muted, navigating */
+.player-status {
+	margin-left: 4px;
+	opacity: 0.8;
+	font-size: 0.9em;
+}
+
+.player-status-lag {
+	color: #f0a940;
+}
+
+.player-status-blocked {
+	font-size: 0.75em;
 }
 
 .show-button {
