@@ -7,6 +7,7 @@
 --- Remote vehicles further than `remoteVehicleCullDistance` from the camera are deactivated (no physics,
 --- no rendering, dormant VE lua). Sync packets for them are held here and replayed when they wake,
 --- so a woken vehicle ends up in the same state as if it had never been culled.
+--- Blocked players' vehicles (UI.blockPlayer) are culled the same way whatever the distance, even with culling off.
 --- @module MPVehiclePoolGE
 --- @usage MPVehiclePoolGE.intercept(serverVehicleID, "e", data) -- from packet handlers
 --- @usage MPVehiclePoolGE.wake(serverVehicleID) -- force a vehicle awake before touching it
@@ -99,6 +100,10 @@ end
 -- @param serverVehicleID string X-Y
 local function isCulled(serverVehicleID)
 	return culled[serverVehicleID] ~= nil
+end
+
+local function isBlocked(vehicle)
+	return vehicle and UI and UI.isBlocked and UI.isBlocked(vehicle.ownerName) or false
 end
 
 --- Called by packet handlers before sending data to VE. Returns true if the vehicle is culled,
@@ -225,14 +230,41 @@ local function wake(serverVehicleID, holdAwake)
 
 	local p = getPool()
 	if not (p.allVehs[gameVehicleID] and p:setVeh(gameVehicleID, true, true)) then veh:setActive(1) end
-	if p:fadeInVeh(gameVehicleID) then veh:setMeshAlpha(0, "") end
+	if isBlocked(MPVehicleGE.getVehicleByServerID(serverVehicleID)) then
+		-- woken for an edit or spawn, stays invisible and gets culled again next frame
+		p.fadeQueue[gameVehicleID] = nil
+		veh:setMeshAlpha(0, "")
+	elseif p:fadeInVeh(gameVehicleID) then
+		veh:setMeshAlpha(0, "")
+	end
 
 	flush(serverVehicleID, state)
 end
 
-local function wakeAll()
+-- blocked vehicles stay culled unless `all` (leaving the server)
+local function wakeAll(all)
 	for serverVehicleID, _ in pairs(culled) do
-		wake(serverVehicleID)
+		if all or not isBlocked(MPVehicleGE.getVehicleByServerID(serverVehicleID)) then wake(serverVehicleID) end
+	end
+end
+
+--- Wakes a player's culled vehicles, for when they're unblocked. Distance culling can take them again after.
+-- @tparam string ownerName
+local function wakePlayer(ownerName)
+	for serverVehicleID, _ in pairs(culled) do
+		local vehicle = MPVehicleGE.getVehicleByServerID(serverVehicleID)
+		if vehicle and vehicle.ownerName == ownerName then wake(serverVehicleID) end
+	end
+end
+
+-- blocked players' vehicles, checked every frame so a new or edited one doesn't show for a moment
+local function cullBlocked(playerVehID)
+	for serverVehicleID, vehicle in pairs(MPVehicleGE.getVehicles()) do
+		local gameVehicleID = vehicle.gameVehicleID
+		if not culled[serverVehicleID] and not vehicle.isLocal and vehicle.isSpawned and gameVehicleID and gameVehicleID ~= playerVehID and isBlocked(vehicle) then
+			local veh = getObjectByID(gameVehicleID)
+			if veh and veh:getActive() then cull(serverVehicleID, gameVehicleID, veh) end
+		end
 	end
 end
 
@@ -246,8 +278,12 @@ end
 
 local function onUpdate(dtReal)
 	clock = clock + dtReal
-	if not enabled then return end
 	if not (MPGameNetwork and MPGameNetwork.launcherConnected()) then return end
+	if UI and UI.hasBlocked and UI.hasBlocked() then
+		local playerVeh = getPlayerVehicle(0)
+		cullBlocked(playerVeh and playerVeh:getID())
+	end
+	if not enabled then return end
 
 	updateTimer = updateTimer - dtReal
 	if updateTimer > 0 then return end
@@ -268,7 +304,7 @@ local function onUpdate(dtReal)
 		local state = culled[serverVehicleID]
 		if state then
 			refreshPosition(vehicle, state)
-			if gameVehicleID == playerVehID or vehicle.position:squaredDistance(camPos) < wakeDist2 then
+			if not isBlocked(vehicle) and (gameVehicleID == playerVehID or vehicle.position:squaredDistance(camPos) < wakeDist2) then
 				wake(serverVehicleID)
 			end
 		elseif gameVehicleID ~= playerVehID and veh:getActive() and (holdAwakeUntil[serverVehicleID] or 0) < clock then
@@ -309,7 +345,7 @@ local function onSettingsChanged()
 end
 
 local function onBeamMPServerLeave()
-	wakeAll()
+	wakeAll(true)
 	reset()
 end
 
@@ -330,6 +366,7 @@ M.interceptPosition      = interceptPosition
 M.isCulled               = isCulled
 M.wake                   = wake
 M.wakeAll                = wakeAll
+M.wakePlayer             = wakePlayer
 M.getCulledCount         = getCulledCount
 
 M.onUpdate               = onUpdate

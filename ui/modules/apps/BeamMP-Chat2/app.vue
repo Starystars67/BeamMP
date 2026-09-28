@@ -15,7 +15,8 @@
           :style="messageStyle(message)"
         >
           <span class="chat-message-timestamp">{{ message.time }}</span>
-          <span v-if="message.hidden" class="chat-message-content">{{ message.hiddenFrom }}<span class="chat-hidden-text" @click="message.hidden = false">hidden message, click to show</span></span>
+          <span v-if="message.blockedCount" class="chat-message-content chat-hidden-text">{{ message.blockedCount === 1 ? "1 message from a blocked player" : message.blockedCount + " messages from a blocked player" }}</span>
+          <span v-else-if="message.hidden" class="chat-message-content">{{ message.hiddenFrom }}<span class="chat-hidden-text" @click="message.hidden = false">hidden message, click to show</span></span>
           <span v-else-if="message.html" class="chat-message-content" v-html="message.html"></span>
           <span v-else-if="message.muted" class="chat-message-content chat-shown-text" title="Click to hide" @click="message.hidden = true">{{ message.text }}</span>
           <span v-else class="chat-message-content">{{ message.text }}</span>
@@ -215,6 +216,7 @@ function storeChatMessages() {
       time: message.time,
       mention: message.mention,
       muted: message.muted,
+      blocked: message.blockedCount || undefined,
     })))
   )
 }
@@ -226,10 +228,16 @@ function loadStoredMessages() {
   try {
     const parsed = JSON.parse(storedMessages)
     if (!Array.isArray(parsed)) return
-    messages.value = parsed.slice(-70).map((entry, index) => createMessage(entry.message, entry.time, `stored-${index}`, entry.mention, entry.muted))
+    messages.value = parsed.slice(-70).map((entry, index) => storedMessage(entry, index))
   } catch {
     messages.value = []
   }
+}
+
+function storedMessage(entry, index) {
+  const message = createMessage(entry.message, entry.time, `stored-${index}`, entry.mention, entry.muted)
+  if (entry.blocked) message.blockedCount = entry.blocked
+  return message
 }
 
 function createMessage(message, time, key, mention = false, muted = false) {
@@ -345,10 +353,27 @@ function addMessage(message, time = currentTimeString(), messageId = null, menti
   scrollToLastMessage()
 }
 
+// one line that counts messages from blocked players, "3 messages from a blocked player"
+function addBlockedMessage(time) {
+  const last = messages.value[messages.value.length - 1]
+  if (last && last.blockedCount) {
+    last.blockedCount++
+    last.time = time
+    last.createdAt = Date.now()
+  } else {
+    const entry = createMessage("", time, `blocked-${Date.now()}`)
+    entry.blockedCount = 1
+    messages.value = [...messages.value, entry].slice(-70)
+  }
+  storeChatMessages()
+  scrollToLastMessage()
+}
+
 function onBeamMPChatMessage(payload) {
   if (!payload || payload.id <= lastMessageId.value) return
   lastMessageId.value = payload.id
   const time = currentTimeString()
+  if (payload.blocked) return addBlockedMessage(time)
   addMessage(payload.message, time, `remote-${payload.id}`, payload.mention, payload.muted)
 
   // unread badge, for messages that come in while we're not looking at the chat
