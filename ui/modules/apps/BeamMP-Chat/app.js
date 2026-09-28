@@ -79,7 +79,7 @@ app.controller("BeamMPChatController", ['$scope', 'Settings', function ($scope, 
 
 		if (chatMessages) {
 			chatMessages.map((v, i) => {
-				addMessage(v.message, v.time, v.mention)
+				addMessage(v.message, v.time, v.mention, v.muted)
 			})
 		}
 
@@ -165,8 +165,8 @@ app.controller("BeamMPChatController", ['$scope', 'Settings', function ($scope, 
 		
 			var time = hour + ":" + minute + ":" + second;
 			
-			storeChatMessage({message: data.message, time: time, mention: data.mention})
-			addMessage(data.message, null, data.mention);
+			storeChatMessage({message: data.message, time: time, mention: data.mention, muted: data.muted})
+			addMessage(data.message, null, data.mention, data.muted);
 
 			// unread badge, for messages that come in while we're not looking at the chat
 			if (!chatShown && document.activeElement !== document.getElementById("chat-input")) {
@@ -408,7 +408,7 @@ function clearUnread() {
 	updateUnread();
 }
 
-function addMessage(msg, time = null, mention = false) {
+function addMessage(msg, time = null, mention = false, muted = false) {
 	//getting current time and adding it to the message before displaying
 	if (time == null) {
 		var now = new Date();
@@ -427,7 +427,7 @@ function addMessage(msg, time = null, mention = false) {
 
 	// Create the message node
 	const chatMessageNode = document.createElement("li");
-	chatMessageNode.className = mention ? "chat-message chat-message-mention" : "chat-message";
+	chatMessageNode.className = mention ? "chat-message chat-message-mention" : (muted ? "chat-message chat-message-hidden" : "chat-message");
 	fadeNode(chatMessageNode);
 
 	// create node for the timestamp
@@ -444,7 +444,29 @@ function addMessage(msg, time = null, mention = false) {
 
 	// check if this message is a server message before
 	// doing rich formatting
-	if (msgText.startsWith("Server: ")) {
+	if (muted) {
+		// a player we muted, show who it's from and let it be clicked to read it
+		const sep = msgText.indexOf(": ");
+		const nameNode = document.createTextNode(sep >= 0 ? msgText.substring(0, sep + 2) : "");
+		const hiddenNode = document.createElement("span");
+		hiddenNode.className = "chat-hidden-text";
+		hiddenNode.textContent = "hidden message, click to show";
+		const shownNode = document.createElement("span");
+		shownNode.className = "chat-shown-text";
+		shownNode.title = "Click to hide";
+		shownNode.textContent = sep >= 0 ? msgText.substring(sep + 2) : msgText;
+		// click to read it, click again to hide it
+		hiddenNode.onclick = function() {
+			hiddenNode.replaceWith(shownNode);
+			chatMessageNode.classList.remove("chat-message-hidden");
+		};
+		shownNode.onclick = function() {
+			shownNode.replaceWith(hiddenNode);
+			chatMessageNode.classList.add("chat-message-hidden");
+		};
+		chatMessageNode.appendChild(nameNode);
+		chatMessageNode.appendChild(hiddenNode);
+	} else if (msgText.startsWith("Server: ")) {
 		const formattedInnerHtml = formatChatMessage(msgText);
 		chatMessageNode.innerHTML = chatMessageNode.innerHTML + formattedInnerHtml;
 	} else {

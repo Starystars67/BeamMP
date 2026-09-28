@@ -20,6 +20,7 @@ local ffi = require('ffi')
 local imgui = ui_imgui
 local heightOffset = 20
 local mentionColor = imgui.ImVec4(0.94, 0.66, 0.25, 1) -- @ in front of messages that mention us
+local hiddenColor = imgui.ImVec4(0.6, 0.63, 0.7, 1) -- "hidden message" for muted players
 local forceBottom = false
 local scrollToBottom = false
 local chatMessageBuf = imgui.ArrayChar(256)
@@ -243,7 +244,7 @@ end
 --- @param message string The message content.
 --- @param id number The ID of the message.
 --- @param color string The color of the message.
-local function addMessage(username, message, id, color, mention)
+local function addMessage(username, message, id, color, mention, muted)
     if(username == "Server") then
         message = formatTextWithColor(message, false)
     else
@@ -258,7 +259,9 @@ local function addMessage(username, message, id, color, mention)
         id = #M.chatMessages + 1,
         currentWidth = imgui.CalcTextSize((mention and "@ " or "") .. username .. ": ").x,
         currentHeight = imgui.CalcTextSize(username .. ": ").y,
-        mention = mention -- someone mentioned us, gets an @ marker
+        mention = mention, -- someone mentioned us, gets an @ marker
+        muted = muted,
+        hidden = muted -- from a player we muted, shown as hidden until it's clicked
     }
     if messageTable.color then
         messageTable.color = imgui.ImVec4(messageTable.color[0]/255, messageTable.color[1]/255, messageTable.color[2]/255, (messageTable.color[3] or 127)/255)
@@ -350,14 +353,20 @@ local function render()
       
             local currentWidth = message.currentWidth
 
-            for _, v in ipairs(message.message) do
-                if (currentWidth + v.width <= columnWidth) then
-                    imgui.SameLine(currentWidth)
-                else
-                    currentWidth = 0
+            if message.hidden then
+                imgui.TextColored(hiddenColor, "hidden message, click to show")
+                if imgui.IsItemClicked() then message.hidden = false end
+            else
+                for _, v in ipairs(message.message) do
+                    if (currentWidth + v.width <= columnWidth) then
+                        imgui.SameLine(currentWidth)
+                    else
+                        currentWidth = 0
+                    end
+                    currentWidth = currentWidth + v.width
+                    imgui.TextColored(v.color, v.text)
+                    if message.muted and imgui.IsItemClicked() then message.hidden = true end -- click again to hide it
                 end
-                currentWidth = currentWidth + v.width
-                imgui.TextColored(v.color, v.text)
             end
 
             if scrollToBottom or forceBottom then

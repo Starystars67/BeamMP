@@ -7,5 +7,14 @@
     "ui.apps.beammp.playerlist.switchCameraTo": "Switch camera to",
     "ui.apps.beammp.playerlist.openProfile": "Open profile",
     "ui.apps.beammp.playerlist.restoreVehicles": "Queue deleted vehicles",
-    "ui.apps.beammp.playerlist.error": "No players… something is wrong"
+    "ui.apps.beammp.playerlist.error": "No players… something is wrong",
+    "ui.apps.beammp.playerlist.navigateTo": "Navigate to",
+    "ui.apps.beammp.playerlist.stopNavigating": "Stop navigating",
+    "ui.apps.beammp.playerlist.mute": "Mute chat",
+    "ui.apps.beammp.playerlist.unmute": "Unmute chat",
+    "ui.apps.beammp.playerlist.typing": "Typing",
+    "ui.apps.beammp.playerlist.away": "Away",
+    "ui.apps.beammp.playerlist.lagging": "Lagging",
+    "ui.apps.beammp.playerlist.muted": "Muted",
+    "ui.apps.beammp.playerlist.navigating": "Navigating to"
 }

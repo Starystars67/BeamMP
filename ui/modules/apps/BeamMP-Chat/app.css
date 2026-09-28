@@ -203,6 +203,22 @@
     background: rgba(240, 169, 64, 0.22);
 }
 
+/* from a player we muted, click to read it */
+.beammpChat .chat-hidden-text {
+    font-style: italic;
+    opacity: 0.6;
+    cursor: pointer;
+}
+
+.beammpChat .chat-hidden-text:hover {
+    opacity: 0.9;
+    text-decoration: underline;
+}
+
+.beammpChat .chat-shown-text {
+    cursor: pointer;
+}
+
 /* new messages while we weren't looking */
 .beammpChat .chat-unread {
     align-self: center;
