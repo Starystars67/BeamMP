@@ -16,9 +16,6 @@ local HIDE_DISTANCE_BELOW = 10   -- no distance text this close, same as the cla
 local STALE_AFTER = 5            -- seconds a tag can go undrawn before its billboards are destroyed
 local DESTROY_DELAY = 60         -- frames between hiding a billboard and destroying it
 local REBUILD_INTERVAL = 2       -- seconds, a tag's card / pill is rebuilt at most this often
-local LAG_NO_DATA = 1.5          -- seconds without a position update before a player shows as lagging
-local LAG_RECOVER = 2            -- seconds of steady data before the lag icon goes again
-local LAG_PING, LAG_PING_OK = 400, 300 -- ms
 local OCCLUSION_INTERVAL = 0.25  -- seconds between line of sight checks per tag
 local HEIGHT_OFFSET = 0.35       -- meters between the vehicle nametag position and the bottom of the tag
 local BIG_MAP_LIFT = 0.3         -- fraction of the way to the camera big map tags are moved, so they're out of the ground
@@ -50,7 +47,7 @@ local clockNow = 0
 local pxToWorld = 0.0013 -- world meters per pixel per meter of distance, from the fov and resolution
 local scale = 1 -- "Modern nametag size" setting
 local screenTimer = 0
-local bigMap = false -- big map open, tags face the screen and go under the players' markers
+local bigMap = false -- big map open, tags go under the players' markers
 
 local camPos, camForward, camRight, camUp, up, xAxis = vec3(), vec3(), vec3(), vec3(), vec3(0, 0, 1), vec3(1, 0, 0)
 local camQuat = quat()
@@ -301,8 +298,7 @@ end
 local function draw(serverVehicleID, v, owner, pos, distance, alpha, roleInfo)
 	local t = tags[serverVehicleID]
 	if not t then
-		t = { icons = {}, wantIcons = {}, lastPosTim = v.lastDt, lastPosAt = clockNow, dataSince = clockNow, lagging = false,
-			occluded = false, occlusionTimer = math.random() * OCCLUSION_INTERVAL }
+		t = { icons = {}, wantIcons = {}, occluded = false, occlusionTimer = math.random() * OCCLUSION_INTERVAL }
 		tags[serverVehicleID] = t
 	end
 	t.drawnFrame, t.lastSeen = frame, clockNow
@@ -310,21 +306,10 @@ local function draw(serverVehicleID, v, owner, pos, distance, alpha, roleInfo)
 	-- faded out
 	if alpha < 0.1 then return true end
 
-	-- lagging, with a bit of hysteresis so the icon doesn't flicker when position packets come in bursts
-	if v.lastDt ~= t.lastPosTim then
-		if clockNow - t.lastPosAt > LAG_NO_DATA then t.dataSince = clockNow end -- data again after a gap
-		t.lastPosTim, t.lastPosAt = v.lastDt, clockNow
-	end
-	local ping = owner.ping or 0
-	if t.lagging then
-		if clockNow - t.lastPosAt < LAG_NO_DATA and clockNow - t.dataSince > LAG_RECOVER and ping < LAG_PING_OK then t.lagging = false end
-	elseif clockNow - t.lastPosAt > LAG_NO_DATA or ping > LAG_PING then
-		t.lagging = true
-	end
 	local wantIcons = t.wantIcons
 	wantIcons.typing = MPPlayerStatusGE and MPPlayerStatusGE.isTyping(v.ownerID) or false
 	wantIcons.away = MPPlayerStatusGE and MPPlayerStatusGE.isAway(v.ownerID) or false
-	wantIcons.lag = t.lagging
+	wantIcons.lag = MPPlayerStatusGE and MPPlayerStatusGE.isLagging(v.ownerID) or false
 
 	-- what the tag should say
 	local name = v.nameTagName or trim(v.nameTag)
@@ -427,12 +412,13 @@ local function draw(serverVehicleID, v, owner, pos, distance, alpha, roleInfo)
 		if not o then o = {} placed[placedCount] = o end
 		o.x, o.y, o.hw, o.hh = sx, sy, hw, hh
 	end
-	-- upright in the world normally, facing the screen on the big map so they don't lie flat
-	if t.screenFacing ~= bigMap then
-		t.screenFacing = bigMap
-		if t.card then renderer:setScreenFacing(t.card, bigMap) end
-		if t.pill then renderer:setScreenFacing(t.pill, bigMap) end
-		for _, id in pairs(t.icons) do renderer:setScreenFacing(id, bigMap) end
+	-- facing the screen, by default billboards face one way in the world so from the side they're skewed (and the icons,
+	-- which are placed along the screen, went into the tag), and on the big map they'd lie flat
+	if not t.screenFacing then
+		t.screenFacing = true
+		if t.card then renderer:setScreenFacing(t.card, true, 0) end -- 0 tilt, flat to the screen
+		if t.pill then renderer:setScreenFacing(t.pill, true, 0) end
+		for _, id in pairs(t.icons) do renderer:setScreenFacing(id, true, 0) end
 	end
 	renderer:update(showId, tagPos, height, true)
 	hide(far and t.card or t.pill)

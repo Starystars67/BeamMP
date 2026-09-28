@@ -3,7 +3,8 @@
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 
 --- MPPlayerStatusGE API.
---- Player status shared with everyone on the server: typing in chat, and away (game not focused).
+--- Player status shared with everyone on the server: typing in chat, and away (game not focused). Also whether a player
+--- is lagging (late position data or high ping), worked out here so the nametags and the player list agree.
 --- Sent as an extra electrics value ("beammp_status") on one of our vehicles. Servers already pass electrics on as they
 --- are, so it works on every server without an update or plugin, and older clients just ignore it.
 --- @module MPPlayerStatusGE
@@ -18,6 +19,9 @@ local STATUS_AWAY = 2
 local RESEND_INTERVAL = 2 -- seconds between resends while a status is set, so players that join late or missed a packet catch up
 local REMOTE_TIMEOUT = 5  -- seconds without hearing from a player before their status is cleared (lost "stopped typing", left etc)
 local AWAY_AFTER = 10     -- seconds with the game window unfocused (alt tabbed) before we show as away
+local LAG_NO_DATA = 1.5   -- seconds without a position update before a player shows as lagging
+local LAG_RECOVER = 2     -- seconds of steady data before they stop showing as lagging
+local LAG_PING, LAG_PING_OK = 400, 300 -- ms
 
 local localStatus = 0
 local sentStatus = 0
@@ -27,6 +31,8 @@ local unfocusedFor = 0
 local focusTimer = 0
 local resendTimer = 0
 local remoteStatus = {} -- [playerID] = { status = bits, age = seconds since last heard }
+local lag = {} -- [playerID] = { posTim, posAt, dataSince, lagging }
+local clockNow = 0
 
 
 -- ============= SENDING =============
@@ -116,6 +122,55 @@ local function isTyping(playerID)
 	return s ~= nil and bit.band(s.status, STATUS_TYPING) ~= 0
 end
 
+--- Returns if a player is lagging: no position data for a while, or a high ping. With a bit of hysteresis so it
+--- doesn't flicker when position packets come in bursts.
+-- @tparam number playerID
+-- @treturn boolean
+local function isLagging(playerID)
+	local l = lag[playerID]
+	return l ~= nil and l.lagging
+end
+
+-- the newest position packet time from any of their spawned vehicles, nil if they have none
+local function lastPositionTime(player)
+	local tim
+	for serverVehicleID in pairs(player.vehicles and player.vehicles.IDs or {}) do
+		local v = MPVehicleGE.getVehicleByServerID(serverVehicleID)
+		if v and v.isSpawned and v.lastDt and (not tim or v.lastDt > tim) then tim = v.lastDt end
+	end
+	return tim
+end
+
+local function updateLag(dt)
+	clockNow = clockNow + dt
+	local players = MPVehicleGE and MPVehicleGE.getPlayers() or {}
+	for playerID, player in pairs(players) do
+		if not player.isLocal then
+			local l = lag[playerID]
+			if not l then
+				l = { posAt = clockNow, dataSince = clockNow, lagging = false }
+				lag[playerID] = l
+			end
+			local tim = lastPositionTime(player)
+			if not tim then
+				l.posAt = clockNow -- nothing spawned, so only the ping counts
+			elseif tim ~= l.posTim then
+				if clockNow - l.posAt > LAG_NO_DATA then l.dataSince = clockNow end -- data again after a gap
+				l.posTim, l.posAt = tim, clockNow
+			end
+			local ping = player.ping or 0
+			if l.lagging then
+				if clockNow - l.posAt < LAG_NO_DATA and clockNow - l.dataSince > LAG_RECOVER and ping < LAG_PING_OK then l.lagging = false end
+			elseif clockNow - l.posAt > LAG_NO_DATA or ping > LAG_PING then
+				l.lagging = true
+			end
+		end
+	end
+	for playerID in pairs(lag) do
+		if not players[playerID] then lag[playerID] = nil end
+	end
+end
+
 
 -- ============= EVENTS =============
 
@@ -141,13 +196,14 @@ local function onUpdate(dt)
 		s.age = s.age + dt
 		if s.age > REMOTE_TIMEOUT then remoteStatus[playerID] = nil end
 	end
+	updateLag(dt)
 end
 
 local function onDisconnect()
 	localStatus, sentStatus, resendTimer = 0, 0, 0
 	typingCef, typingImgui = false, false
 	unfocusedFor, focusTimer = 0, 0
-	remoteStatus = {}
+	remoteStatus, lag = {}, {}
 end
 
 
@@ -155,6 +211,7 @@ M.setTyping      = setTyping
 M.setTypingImgui = setTypingImgui
 M.isTyping       = isTyping
 M.isAway         = isAway
+M.isLagging      = isLagging
 M.handle         = handle
 
 M.onUpdate       = onUpdate
