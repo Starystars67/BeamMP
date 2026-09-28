@@ -10,7 +10,8 @@
 
 local M = {
     chatMessages = {},
-    newMessageCount = 0
+    newMessageCount = 0,
+    newMentionCount = 0
 }
 
 local utils = require("beammp.ui.utils")
@@ -18,6 +19,7 @@ local ffi = require('ffi')
 
 local imgui = ui_imgui
 local heightOffset = 20
+local mentionColor = imgui.ImVec4(0.94, 0.66, 0.25, 1) -- @ in front of messages that mention us
 local forceBottom = false
 local scrollToBottom = false
 local chatMessageBuf = imgui.ArrayChar(256)
@@ -241,7 +243,7 @@ end
 --- @param message string The message content.
 --- @param id number The ID of the message.
 --- @param color string The color of the message.
-local function addMessage(username, message, id, color)
+local function addMessage(username, message, id, color, mention)
     if(username == "Server") then
         message = formatTextWithColor(message, false)
     else
@@ -254,8 +256,9 @@ local function addMessage(username, message, id, color)
         message = message,
         sentTime = os.time(),
         id = #M.chatMessages + 1,
-        currentWidth = imgui.CalcTextSize(username .. ": ").x,
-        currentHeight = imgui.CalcTextSize(username .. ": ").y
+        currentWidth = imgui.CalcTextSize((mention and "@ " or "") .. username .. ": ").x,
+        currentHeight = imgui.CalcTextSize(username .. ": ").y,
+        mention = mention -- someone mentioned us, gets an @ marker
     }
     if messageTable.color then
         messageTable.color = imgui.ImVec4(messageTable.color[0]/255, messageTable.color[1]/255, messageTable.color[2]/255, (messageTable.color[3] or 127)/255)
@@ -269,6 +272,7 @@ local function addMessage(username, message, id, color)
 
     if not forceBottom and username ~= MPConfig:getNickname() then
         M.newMessageCount = M.newMessageCount + 1
+        if mention then M.newMentionCount = M.newMentionCount + 1 end
     end
 end
 
@@ -311,6 +315,7 @@ local function render()
 
         if scrollbarPos >= imgui.GetScrollMaxY() then
             M.newMessageCount = 0
+            M.newMentionCount = 0
             wasMessageSent = false
             forceBottom = true
         else
@@ -331,6 +336,10 @@ local function render()
 
             columnWidth = columnWidth - 10
             
+            if message.mention then
+                imgui.TextColored(mentionColor, "@")
+                imgui.SameLine()
+            end
             if message.color then
                     imgui.TextColored(message.color, message.username)
                 imgui.SameLine()
