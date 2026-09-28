@@ -21,6 +21,7 @@ local LAG_RECOVER = 2            -- seconds of steady data before the lag icon g
 local LAG_PING, LAG_PING_OK = 400, 300 -- ms
 local OCCLUSION_INTERVAL = 0.25  -- seconds between line of sight checks per tag
 local HEIGHT_OFFSET = 0.35       -- meters between the vehicle nametag position and the bottom of the tag
+local BIG_MAP_LIFT = 0.3         -- fraction of the way to the camera big map tags are moved, so they're out of the ground
 
 -- size on screen in pixels, so tags stay the same size like the classic ones
 local CARD_PX, PILL_PX, ICON_PX = 34, 22, 15
@@ -49,8 +50,10 @@ local clockNow = 0
 local pxToWorld = 0.0013 -- world meters per pixel per meter of distance, from the fov and resolution
 local scale = 1 -- "Modern nametag size" setting
 local screenTimer = 0
+local bigMap = false -- big map open, tags face the screen and go under the players' markers
 
-local camPos, camForward, camRight, camUp, up = vec3(), vec3(), vec3(), vec3(), vec3(0, 0, 1)
+local camPos, camForward, camRight, camUp, up, xAxis = vec3(), vec3(), vec3(), vec3(), vec3(0, 0, 1), vec3(1, 0, 0)
+local camQuat = quat()
 local placed, placedCount = {}, 0 -- tags already placed this frame, in camera space, for stacking
 local tagPos, iconPos, rayDir, offset = vec3(), vec3(), vec3(), vec3()
 
@@ -219,7 +222,7 @@ local function process(t)
 	if t.wantCardKey ~= t.cardKey and (not t.card or rebuildOk) then
 		release(t.card)
 		t.card = renderer:create(jsonEncode(t.wantCardTemplate), true)
-		t.cardKey, t.cardHeight, t.cardVars = t.wantCardKey, t.wantCardHeight, nil
+		t.cardKey, t.cardHeight, t.cardVars, t.screenFacing = t.wantCardKey, t.wantCardHeight, nil, nil
 		if t.cardKey then t.lastRebuild = clockNow end
 	elseif t.card and t.cardVars ~= t.wantCardVars then
 		renderer:render(t.card, jsonEncode({ sub = t.wantSub or "", spec = t.wantSpec or "" }))
@@ -227,7 +230,7 @@ local function process(t)
 	elseif t.wantPillKey ~= t.pillKey and (not t.pill or rebuildOk) then
 		release(t.pill)
 		t.pill = renderer:create(jsonEncode(t.wantPillTemplate), true)
-		t.pillKey, t.pillVars = t.wantPillKey, nil
+		t.pillKey, t.pillVars, t.screenFacing = t.wantPillKey, nil, nil
 		t.lastRebuild = clockNow
 	elseif t.pill and t.pillVars ~= t.wantPillVars then
 		renderer:render(t.pill, jsonEncode({ dist = t.wantDist or "" }))
@@ -238,6 +241,7 @@ local function process(t)
 				local id = renderer:create(jsonEncode(ICONS[name]), false)
 				if id and id ~= 0 then renderer:render(id, "{}") end
 				t.icons[name] = id
+				t.screenFacing = nil
 				break
 			end
 		end
@@ -334,7 +338,7 @@ local function draw(serverVehicleID, v, owner, pos, distance, alpha, roleInfo)
 	rayDir:set(pos)
 	rayDir:setSub(camPos)
 	local camDistance = rayDir:length()
-	local far = camDistance > FAR_DISTANCE
+	local far = bigMap or camDistance > FAR_DISTANCE
 
 	local cardKey = name .. "|" .. accent .. "|" .. tostring(sub ~= "") .. tostring(spec ~= "")
 	local pillKey = name .. "|" .. accent .. "|" .. tostring(distText ~= "")
@@ -349,7 +353,7 @@ local function draw(serverVehicleID, v, owner, pos, distance, alpha, roleInfo)
 	if needsWork(t) then schedule(t) end
 
 	-- line of sight, only needed when nametags should show through objects
-	if not hideBehindObjects then
+	if not hideBehindObjects and not bigMap then
 		t.occlusionTimer = t.occlusionTimer - (t.dt or 0)
 		if t.occlusionTimer <= 0 then
 			t.occlusionTimer = OCCLUSION_INTERVAL
@@ -376,7 +380,23 @@ local function draw(serverVehicleID, v, owner, pos, distance, alpha, roleInfo)
 		width = height * CARD_W / (t.cardHeight or CARD_H)
 	end
 	tagPos:set(pos)
-	tagPos.z = tagPos.z + HEIGHT_OFFSET + height * 0.5
+	local sizeScale = 1
+	if bigMap then
+		-- the big map camera is high up and billboards hide behind the ground, so move it along the line to the camera,
+		-- same place on screen but out of the terrain, and smaller by as much so it's still the same size on screen
+		sizeScale = 1 - BIG_MAP_LIFT
+		height, width = height * sizeScale, width * sizeScale
+		offset:set(camPos)
+		offset:setSub(pos)
+		offset:setScaled(BIG_MAP_LIFT)
+		tagPos:setAdd(offset)
+		-- then just under the vehicle on screen, the big map marker is above it
+		offset:set(camUp)
+		offset:setScaled(-height)
+		tagPos:setAdd(offset)
+	else
+		tagPos.z = tagPos.z + HEIGHT_OFFSET + height * 0.5
+	end
 
 	-- stacking: push this tag up above any tag it overlaps on screen that was already placed this frame
 	offset:set(tagPos)
@@ -407,11 +427,18 @@ local function draw(serverVehicleID, v, owner, pos, distance, alpha, roleInfo)
 		if not o then o = {} placed[placedCount] = o end
 		o.x, o.y, o.hw, o.hh = sx, sy, hw, hh
 	end
+	-- upright in the world normally, facing the screen on the big map so they don't lie flat
+	if t.screenFacing ~= bigMap then
+		t.screenFacing = bigMap
+		if t.card then renderer:setScreenFacing(t.card, bigMap) end
+		if t.pill then renderer:setScreenFacing(t.pill, bigMap) end
+		for _, id in pairs(t.icons) do renderer:setScreenFacing(id, bigMap) end
+	end
 	renderer:update(showId, tagPos, height, true)
 	hide(far and t.card or t.pill)
 
 	-- icons in a row to the right of the tag
-	local iconSize = worldSize(camDistance, ICON_PX, ICON_MIN)
+	local iconSize = worldSize(camDistance, ICON_PX, ICON_MIN) * sizeScale
 	local x = width * 0.5 + iconSize * 0.7
 	for _, n in ipairs(ICON_ORDER) do
 		local id = t.icons[n]
@@ -473,11 +500,12 @@ local function onPreRender(dt)
 	frame = frame + 1
 	clockNow = clockNow + dt
 	camPos:set(core_camera.getPositionXYZ())
+	-- from the camera rotation, crossing forward with world up breaks when looking straight down on the big map
+	camQuat:set(core_camera.getQuatXYZW())
 	camForward:set(core_camera.getForwardXYZ())
-	camRight:set(camForward:cross(up))
-	camRight:normalize()
-	camUp:set(camRight:cross(camForward))
-	camUp:normalize()
+	camRight:setRotate(camQuat, xAxis)
+	camUp:setRotate(camQuat, up)
+	bigMap = freeroam_bigMapMode and freeroam_bigMapMode.bigMapActive() or false
 	placedCount = 0
 	screenTimer = screenTimer - dt
 	if screenTimer <= 0 then
