@@ -56,6 +56,7 @@ app.controller("BeamMPChatController", ['$scope', 'Settings', function ($scope, 
 			chatinput.addEventListener('keydown', onKeyDown); //used for 'up arrow' last msg functionality
 			chatinput.addEventListener('input', updateTyping); // typing indicator above our nametag for everyone else
 			chatinput.addEventListener('focus', updateTyping);
+			chatinput.addEventListener('focus', clearUnread);
 			chatinput.addEventListener('blur', updateTyping);
 		}
 
@@ -78,7 +79,7 @@ app.controller("BeamMPChatController", ['$scope', 'Settings', function ($scope, 
 
 		if (chatMessages) {
 			chatMessages.map((v, i) => {
-				addMessage(v.message, v.time)
+				addMessage(v.message, v.time, v.mention)
 			})
 		}
 
@@ -164,8 +165,15 @@ app.controller("BeamMPChatController", ['$scope', 'Settings', function ($scope, 
 		
 			var time = hour + ":" + minute + ":" + second;
 			
-			storeChatMessage({message: data.message, time: time})
-			addMessage(data.message);
+			storeChatMessage({message: data.message, time: time, mention: data.mention})
+			addMessage(data.message, null, data.mention);
+
+			// unread badge, for messages that come in while we're not looking at the chat
+			if (!chatShown && document.activeElement !== document.getElementById("chat-input")) {
+				unreadCount++;
+				if (data.mention) unreadMentions++;
+				updateUnread();
+			}
 		}
 	});
 
@@ -245,6 +253,7 @@ async function fadeNode(node) {
 
 async function showChat() {
 	if (newChatMenu) return;
+	clearUnread();
 
 	// While the mouse is over the chat, we wait
 	var chatMessages = []
@@ -378,7 +387,28 @@ function retrieveChatMessages() {
 	}
 }
 
-function addMessage(msg, time = null) {
+var unreadCount = 0;
+var unreadMentions = 0;
+
+function updateUnread() {
+	const badge = document.getElementById("chat-unread");
+	if (!badge) return;
+	if (unreadCount > 0) {
+		badge.textContent = unreadMentions > 0 ? unreadCount + " · @" + unreadMentions : "" + unreadCount;
+		badge.classList.toggle("chat-unread-mention", unreadMentions > 0);
+		badge.style.display = "";
+	} else {
+		badge.style.display = "none";
+	}
+}
+
+function clearUnread() {
+	unreadCount = 0;
+	unreadMentions = 0;
+	updateUnread();
+}
+
+function addMessage(msg, time = null, mention = false) {
 	//getting current time and adding it to the message before displaying
 	if (time == null) {
 		var now = new Date();
@@ -397,7 +427,7 @@ function addMessage(msg, time = null) {
 
 	// Create the message node
 	const chatMessageNode = document.createElement("li");
-	chatMessageNode.className = "chat-message";
+	chatMessageNode.className = mention ? "chat-message chat-message-mention" : "chat-message";
 	fadeNode(chatMessageNode);
 
 	// create node for the timestamp

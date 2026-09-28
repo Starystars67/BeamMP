@@ -11,6 +11,7 @@
           v-for="message in messages"
           :key="message.key"
           class="chat-message"
+          :class="{ 'chat-message-mention': message.mention }"
           :style="messageStyle(message)"
         >
           <span class="chat-message-timestamp">{{ message.time }}</span>
@@ -29,6 +30,7 @@
         >
           {{ sendButtonText }}
         </button>
+		<span v-if="unreadCount > 0" class="chat-unread" :class="{ 'chat-unread-mention': unreadMentions > 0 }" title="New messages">{{ unreadCount }}{{ unreadMentions > 0 ? " · @" + unreadMentions : "" }}</span>
 		<BngInput
             v-model="inputText"
             class="chat-input"
@@ -82,6 +84,16 @@ const useUiAppRedesign = ref(false)
 const isHovered = ref(false)
 const isFocused = ref(false)
 const chatHasFocus = ref(false)
+const unreadCount = ref(0)
+const unreadMentions = ref(0)
+
+// looking at the chat clears the unread badge
+watch([isHovered, chatHasFocus], ([hovered, focused]) => {
+  if (hovered || focused) {
+    unreadCount.value = 0
+    unreadMentions.value = 0
+  }
+})
 
 // typing indicator above our nametag for everyone else, only sent to GE when it changes
 const isTyping = computed(() => chatHasFocus.value && inputText.value.trim() !== "")
@@ -199,6 +211,7 @@ function storeChatMessages() {
     JSON.stringify(messages.value.slice(-70).map((message) => ({
       message: message.raw,
       time: message.time,
+      mention: message.mention,
     })))
   )
 }
@@ -210,13 +223,13 @@ function loadStoredMessages() {
   try {
     const parsed = JSON.parse(storedMessages)
     if (!Array.isArray(parsed)) return
-    messages.value = parsed.slice(-70).map((entry, index) => createMessage(entry.message, entry.time, `stored-${index}`))
+    messages.value = parsed.slice(-70).map((entry, index) => createMessage(entry.message, entry.time, `stored-${index}`, entry.mention))
   } catch {
     messages.value = []
   }
 }
 
-function createMessage(message, time, key) {
+function createMessage(message, time, key, mention = false) {
   const raw = String(message ?? "")
   const formatted = raw.startsWith("Server: ") ? formatChatMessage(raw) : ""
   return {
@@ -226,6 +239,7 @@ function createMessage(message, time, key) {
     html: formatted,
     time,
     createdAt: Date.now(),
+    mention: Boolean(mention), // someone mentioned us
   }
 }
 
@@ -317,8 +331,8 @@ function onInputKeydown(event) {
   }
 }
 
-function addMessage(message, time = currentTimeString(), messageId = null) {
-  const entry = createMessage(message, time, messageId ?? `local-${Date.now()}-${messages.value.length}`)
+function addMessage(message, time = currentTimeString(), messageId = null, mention = false) {
+  const entry = createMessage(message, time, messageId ?? `local-${Date.now()}-${messages.value.length}`, mention)
   messages.value = [...messages.value, entry].slice(-70)
   storeChatMessages()
   scrollToLastMessage()
@@ -328,7 +342,13 @@ function onBeamMPChatMessage(payload) {
   if (!payload || payload.id <= lastMessageId.value) return
   lastMessageId.value = payload.id
   const time = currentTimeString()
-  addMessage(payload.message, time, `remote-${payload.id}`)
+  addMessage(payload.message, time, `remote-${payload.id}`, payload.mention)
+
+  // unread badge, for messages that come in while we're not looking at the chat
+  if (!isHovered.value && !chatHasFocus.value) {
+    unreadCount.value++
+    if (payload.mention) unreadMentions.value++
+  }
 }
 
 function onClearHistory() {
@@ -620,5 +640,28 @@ onUnmounted(() => {
     content: "↗";
     font-size: 1rem;
   }
+}
+
+/* someone mentioned us */
+.beammpChat2 .chat-message.chat-message-mention {
+  border-left-color: #f0a940;
+  background: rgba(240, 169, 64, 0.22);
+}
+
+/* new messages while we weren't looking */
+.beammpChat2 .chat-unread {
+  align-self: center;
+  margin: 0 0.3rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 1rem;
+  background: var(--bng-cool-gray-600, #4a5063);
+  color: var(--bng-off-white, #fff);
+  font-size: 0.8em;
+  white-space: nowrap;
+}
+
+.beammpChat2 .chat-unread.chat-unread-mention {
+  background: #f0a940;
+  color: #1b1f2a;
 }
 </style>

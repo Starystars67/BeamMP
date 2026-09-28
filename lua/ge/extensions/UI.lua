@@ -329,7 +329,7 @@ local function renderWindow(dtRaw)
         if currentWindow == windows.chat then
             local msgCount = windows.chat.newMessageCount
             if msgCount > 0 then
-                windowTitle = "BeamMP Chat (" .. tostring(msgCount) .. ')'
+                windowTitle = "BeamMP Chat (" .. tostring(msgCount) .. (windows.chat.newMentionCount > 0 and (" · @" .. windows.chat.newMentionCount) or "") .. ')'
             else
                 windowTitle = "BeamMP Chat"
             end
@@ -467,6 +467,23 @@ end
 --- Function is for when the game receives a new chat message from the server. 
 -- This is for handling the raw chat message
 -- @param rawMessage string The raw chat message with header codes
+--- Returns if a chat message mentions us: our name as a whole word, with or without an @, from someone else.
+-- @tparam string username who sent it
+-- @tparam string msg the message
+-- @treturn boolean
+local function isMention(username, msg)
+	local nick = MPConfig.getNickname()
+	if not nick or nick == "" or username == nick then return false end
+	local text, name = msg:lower(), nick:lower()
+	local s, e = text:find(name, 1, true)
+	while s do
+		local before, after = text:sub(s - 1, s - 1), text:sub(e + 1, e + 1)
+		if not before:match("[%w_]") and not after:match("[%w_]") then return true end -- not part of a longer word
+		s, e = text:find(name, e + 1, true)
+	end
+	return false
+end
+
 local function chatMessage(rawMessage) -- chat message received (angular)
 	chatcounter = chatcounter+1
 	local message = string.sub(rawMessage, 2)
@@ -474,20 +491,24 @@ local function chatMessage(rawMessage) -- chat message received (angular)
 	local username = parts[1]
 	parts[1] = ''
 	local msg = string.gsub(message, username..': ', '')
+	local mention = isMention(username, msg)
+	if mention and settings.getValue("chatMentionSound") ~= false then
+		Engine.Audio.playOnce('AudioGui', 'event:>UI>Missions>Info_Open')
+	end
 	local player = MPVehicleGE.getPlayerByName(username)
 	if player then
         username = username .. player.role.shorttag
 		local c = player.role.forecolor
 		local color = {[0] = c.r, [1] = c.g, [2] = c.b, [3] = c.a}
 		log('M', 'chatMessage', 'Chat message received from: '..username..' >' ..msg) -- DO NOT REMOVE
-		guihooks.trigger("onBeamMPChatMessage", {username = username, message = message, id = chatcounter, color = color})
+		guihooks.trigger("onBeamMPChatMessage", {username = username, message = message, id = chatcounter, color = color, mention = mention})
 		-- For IMGUI
-		chatWindow.addMessage(username, msg, chatcounter, color)
+		chatWindow.addMessage(username, msg, chatcounter, color, mention)
 	else
 		log('M', 'chatMessage', 'Chat message received from: '..username.. ' >' ..msg) -- DO NOT REMOVE
-		guihooks.trigger("onBeamMPChatMessage", {username = username, message = message, id = chatcounter})
+		guihooks.trigger("onBeamMPChatMessage", {username = username, message = message, id = chatcounter, mention = mention})
 		-- For IMGUI
-		chatWindow.addMessage(username, msg, chatcounter)
+		chatWindow.addMessage(username, msg, chatcounter, nil, mention)
 	end
 	TriggerClientEvent("ChatMessageReceived", message, username) -- Username added last to not break other mods.
 end
