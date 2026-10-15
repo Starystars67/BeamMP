@@ -19,6 +19,7 @@ local STATUS_AWAY = 2
 local RESEND_INTERVAL = 2 -- seconds between resends while a status is set, so players that join late or missed a packet catch up
 local REMOTE_TIMEOUT = 5  -- seconds without hearing from a player before their status is cleared (lost "stopped typing", left etc)
 local AWAY_AFTER = 10     -- seconds with the game window unfocused (alt tabbed) before we show as away
+local CEF_TYPING_TIMEOUT = 8 -- seconds without the chat saying we're still typing before it's cleared (focus lost etc)
 local LAG_NO_DATA = 1.5   -- seconds without a position update before a player shows as lagging
 local LAG_RECOVER = 2     -- seconds of steady data before they stop showing as lagging
 local LAG_PING, LAG_PING_OK = 400, 300 -- ms
@@ -27,6 +28,7 @@ local localStatus = 0
 local sentStatus = 0
 local typingCef, typingImgui = false, false -- each chat window reports on its own so they can't overwrite each other
 local imguiTypingAge = 0 -- the imgui chat reports every frame it's drawn, if it stops (window closed) typing ends
+local cefTypingAge = 0   -- the CEF chats resend while typing, so it can't get stuck if they never say they stopped
 local unfocusedFor = 0
 local focusTimer = 0
 local resendTimer = 0
@@ -70,6 +72,7 @@ end
 -- @tparam boolean typing
 local function setTyping(typing)
 	typingCef = typing and true or false
+	cefTypingAge = 0
 	if not typingCef then typingImgui = false end -- a sent message ends typing in both
 	updateTyping()
 end
@@ -180,6 +183,13 @@ local function onUpdate(dt)
 		if Engine and Engine.isProgramFocused and not Engine.isProgramFocused() then unfocusedFor = unfocusedFor + focusTimer else unfocusedFor = 0 end
 		focusTimer = 0
 		setStatusBit(STATUS_AWAY, unfocusedFor >= AWAY_AFTER)
+	end
+	if typingCef then
+		cefTypingAge = cefTypingAge + dt
+		if cefTypingAge > CEF_TYPING_TIMEOUT then -- the chat stopped telling us, eg it lost focus without a blur
+			typingCef = false
+			updateTyping()
+		end
 	end
 	if typingImgui then
 		imguiTypingAge = imguiTypingAge + dt

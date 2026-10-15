@@ -196,11 +196,15 @@ app.controller("BeamMPChatController", ['$scope', 'Settings', function ($scope, 
 	})
 
 	var isTyping = false;
+	var lastTypingSent = 0;
 	function updateTyping() {
 		let chatinput = document.getElementById("chat-input");
 		const typing = !!chatinput && document.activeElement === chatinput && chatinput.value.trim() !== "";
-		if (typing === isTyping) return; // only tell GE when it changes
+		const now = Date.now();
+		// tell GE when it changes, and every 2s while still typing so GE can clear it if we never say we stopped
+		if (typing === isTyping && !(typing && now - lastTypingSent > 2000)) return;
 		isTyping = typing;
+		lastTypingSent = now;
 		bngApi.engineLua('if MPPlayerStatusGE then MPPlayerStatusGE.setTyping(' + typing + ') end');
 	}
 

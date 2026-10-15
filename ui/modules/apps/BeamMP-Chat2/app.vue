@@ -97,9 +97,14 @@ watch([isHovered, chatHasFocus], ([hovered, focused]) => {
   }
 })
 
-// typing indicator above our nametag for everyone else, only sent to GE when it changes
+// typing indicator above our nametag for everyone else, sent to GE when it changes and every 2s while still
+// typing, so GE can clear it if we never say we stopped
 const isTyping = computed(() => chatHasFocus.value && inputText.value.trim() !== "")
-watch(isTyping, (typing) => {
+let lastTypingSent = 0
+watch([isTyping, inputText], ([typing], [wasTyping]) => {
+  const now = Date.now()
+  if (typing === wasTyping && !(typing && now - lastTypingSent > 2000)) return
+  lastTypingSent = now
   api.engineLua(`if MPPlayerStatusGE then MPPlayerStatusGE.setTyping(${typing}) end`)
 })
 const chatHorizontal = ref(localStorage.getItem("chatHorizontal") || "middle")
@@ -403,6 +408,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  if (isTyping.value) api.engineLua("if MPPlayerStatusGE then MPPlayerStatusGE.setTyping(false) end") // closed mid message
   events.off("onBeamMPChatMessage", onBeamMPChatMessage)
   events.off("onBeamMPClearChatHistory", onClearHistory)
   events.off("SettingsChanged", onSettingsChanged)
