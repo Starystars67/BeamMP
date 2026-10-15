@@ -10,7 +10,7 @@
 
 local M = {}
 
-local REFRESH_INTERVAL = 3 -- seconds between big map refreshes while it's open, so the player markers follow them
+local REFRESH_INTERVAL = 1 -- seconds between big map refreshes while it's open, so the player markers follow them
 local USER_COLOR = { r = 79, g = 195, b = 247 } -- normal players, USER role is white on black
 
 local refreshTimer = 0
@@ -138,7 +138,7 @@ local function onUpdate(dtReal)
 		refreshTimer = 0
 		return
 	end
-	-- players move, so every few seconds get new POI positions while the big map is open. The markers keep their
+	-- players move, so every second get new POI positions while the big map is open. The markers keep their
 	-- first position, so they're rebuilt too, at full alpha so nothing fades
 	refreshTimer = refreshTimer + dtReal
 	if refreshTimer >= REFRESH_INTERVAL then
