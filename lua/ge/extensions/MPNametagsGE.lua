@@ -525,7 +525,7 @@ local function onExtensionLoaded()
 	refreshSettings()
 end
 
-local function onDisconnect()
+local function onBeamMPServerLeave()
 	destroyAll()
 end
 
@@ -552,7 +552,7 @@ M.draw                = draw
 M.onPreRender         = onPreRender
 M.onSettingsChanged   = onSettingsChanged
 M.onExtensionLoaded   = onExtensionLoaded
-M.onDisconnect        = onDisconnect
+M.onBeamMPServerLeave = onBeamMPServerLeave
 M.onClientEndMission  = onClientEndMission
 M.onExtensionUnloaded = onExtensionUnloaded
 M.onInit = function() setExtensionUnloadMode(M, "manual") end
