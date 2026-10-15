@@ -487,7 +487,7 @@ local function chatMessage(rawMessage) -- chat message received (angular)
 		log('M', 'chatMessage', 'Chat message received from: '..username.. ' >' ..msg) -- DO NOT REMOVE
 		guihooks.trigger("onBeamMPChatMessage", {username = username, message = message, id = chatcounter})
 		-- For IMGUI
-		chatWindow.addMessage(username, msg, id)
+		chatWindow.addMessage(username, msg, chatcounter)
 	end
 	TriggerClientEvent("ChatMessageReceived", message, username) -- Username added last to not break other mods.
 end
