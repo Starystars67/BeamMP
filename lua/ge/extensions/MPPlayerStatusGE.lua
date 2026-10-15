@@ -209,7 +209,7 @@ local function onUpdate(dt)
 	updateLag(dt)
 end
 
-local function onDisconnect()
+local function onBeamMPServerLeave()
 	localStatus, sentStatus, resendTimer = 0, 0, 0
 	typingCef, typingImgui = false, false
 	unfocusedFor, focusTimer = 0, 0
@@ -224,8 +224,8 @@ M.isAway         = isAway
 M.isLagging      = isLagging
 M.handle         = handle
 
-M.onUpdate       = onUpdate
-M.onDisconnect   = onDisconnect
+M.onUpdate            = onUpdate
+M.onBeamMPServerLeave = onBeamMPServerLeave
 M.onInit = function() setExtensionUnloadMode(M, "manual") end
 
 return M

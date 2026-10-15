@@ -619,7 +619,7 @@ local function onClientEndMission(mission)
 end
 
 -- mutes are only for the session
-local function onDisconnect()
+local function onBeamMPServerLeave()
 	mutedPlayers, navigatingTo, sentStatus = {}, nil, ""
 end
 
@@ -779,7 +779,7 @@ M.navigateToPlayer = navigateToPlayer
 M.sendPlayerStatus = sendPlayerStatus
 
 M.onClientEndMission = onClientEndMission
-M.onDisconnect = onDisconnect
+M.onBeamMPServerLeave = onBeamMPServerLeave
 M.onExtensionLoaded = onExtensionLoaded
 M.onUpdate = onUpdate
 M.onInit = function() setExtensionUnloadMode(M, "manual") end
