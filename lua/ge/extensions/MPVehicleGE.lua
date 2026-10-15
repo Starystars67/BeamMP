@@ -2744,6 +2744,8 @@ local function onPreRender(dt)
 
 
 				local roleInfo = v.customRole or owner.customRole or owner.role
+				-- modern nametags (opt in), false means draw the classic one this frame (not ready yet or out of sight)
+				if MPNametagsGE and MPNametagsGE.isActive() and MPNametagsGE.draw(serverVehicleID, v, owner, pos, distfloat, nametagAlpha, roleInfo) then goto skip_vehicle end
 				local backColor = color(roleInfo.backcolor.r, roleInfo.backcolor.g, roleInfo.backcolor.b, math.floor(nametagAlpha*127))
 				-- draw spectators
 				if settings.getValue("showSpectators") then
