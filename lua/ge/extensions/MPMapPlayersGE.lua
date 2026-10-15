@@ -58,7 +58,11 @@ local function forEachRemote(fn)
 			local owner = v:getOwner()
 			local veh = owner and getObjectByID(v.gameVehicleID)
 			if veh and not (anyBlocked and UI.isBlocked(owner.name)) then
-				if veh:getActive() then vehPos:set(veh:getPositionXYZ()) else vehPos:set(v.position) end
+				if veh:getActive() and not (MPVehiclePoolGE and MPVehiclePoolGE.isSettling(serverVehicleID)) then
+					vehPos:set(veh:getPositionXYZ())
+				else
+					vehPos:set(v.position)
+				end
 				fn(serverVehicleID, v, owner, vehPos)
 			end
 		end
