@@ -6,25 +6,41 @@
 --- Syncs liveries made in the game's livery editor. The owner sends the livery's layers (the same json the editor saves
 --- in settings/dynamicDecals) with the vehicle data, and everyone else bakes them onto their copy of the vehicle with
 --- their own decal projection. Nothing changes on the server, it stores and replays the vehicle data as it is.
+---
+--- A decal projection uses a lot of video memory (measured about 45 MB at 1024x512, 140 MB at 2048x1024 and 440 MB at
+--- 4096x2048) and doesn't give it back when it's freed, so there's a fixed pool of them that gets reused, and the
+--- nearest vehicles get them. The others show their normal paint until one is free.
 --- @module MPDecalsGE
 
 local M = {}
 
 local SAVE_DIR = "/settings/dynamicDecals/"
 local MAX_LIVERY_SIZE = 256 * 1024 -- bytes of layer json, bigger liveries aren't sent
-local MAX_LIVERIES = 10 -- remote liveries shown at once, each one keeps its own textures
-local TEXTURE_SIZE = Point2I(2048, 1024) -- the editor uses 4096x2048, a quarter of the memory looks the same on other players' vehicles
+local MAX_LIVERIES = 5 -- remote liveries shown at once, the size of the pool
 local SETTLE_FRAMES = 3 -- frames of project / combine after a bake, the textures stay after that
+local PRIORITY_INTERVAL = 2 -- seconds between choosing which vehicles get a livery, nearest first
+local PAINT_LAYERS = { { type = 1, name = "Paint", blendMode = 0, color = { 1, 1, 1, 1 }, colorPaletteMapId = 1, enabled = true, uid = "BMP-PAINT" } }
 
-local liveries = {} -- [gameVehicleID] = { dcl, projection, textureSet, settle, waiting }
+local pool = {} -- { projection, textureSet, owner }, created up to MAX_LIVERIES and then reused
+local paint -- { projection, textureSet } shared by liveried vehicles without a projection, shows their own paint
+local liveries = {} -- [gameVehicleID] = { dcl, slot, settle }
 local bakeQueue = {} -- gameVehicleIDs waiting for a bake, one per frame
 local loggedMissing = {} -- [path] = true, missing livery files are only logged once
+local priorityTimer = 0
 
 
 -- ============= HELPERS =============
 
 local function isEnabled()
-	return settings.getValue("beammpShowLiveries") ~= false
+	return settings.getValue("showLiveries") ~= false
+end
+
+-- read once, when the first projection is made. Changing the size of a projection doesn't give the old textures back,
+-- so a change applies after restarting the game
+local poolSize = nil
+local function textureSize()
+	poolSize = poolSize or (settings.getValue("highQualityLiveries") and Point2I(2048, 1024) or Point2I(1024, 512))
+	return poolSize
 end
 
 local function findPaintDesign(node)
@@ -40,14 +56,6 @@ local function paintDesignPart(gameVehicleID)
 	local vehicleData = core_vehicle_manager.getVehicleData(gameVehicleID)
 	local node = vehicleData and findPaintDesign(vehicleData.config.partsTree)
 	return node and node.chosenPartName, vehicleData
-end
-
-local function liveryCount()
-	local n = 0
-	for _, livery in pairs(liveries) do
-		if livery.projection then n = n + 1 end
-	end
-	return n
 end
 
 -- the texture and font files a layer uses, a layer with a file we don't have is left out
@@ -127,6 +135,79 @@ local function placeProjection(projection, veh)
 	projection:setMirrorOffset(veh:getSpawnLocalAABB():getCenter().x)
 end
 
+local function projectAndCombine(projection, textureSet, veh)
+	placeProjection(projection, veh)
+	projection:projectDynamicDecals(veh:getRefNodeMatrix():fullInverse():mul(getCameraTransform()), getCameraProjMatrix())
+	projection:combineTextures(textureSet)
+end
+
+local function bakeOnto(projection, veh, gameVehicleID, layerStackData)
+	local jbeam = veh:getJBeamFilename()
+	placeProjection(projection, veh)
+	if not setMaterials(projection, gameVehicleID, jbeam) then
+		log('W', 'MPDecalsGE', "No livery material found on " .. jbeam .. ", the livery isn't shown")
+		return false
+	end
+	local layers = deserializeLayers(layerStackData)
+	if not layers then return false end
+	projection:clearBakedTextures()
+	local result = projection:bakeLayers(layers, jbeam)
+	if result and result.status and result.status.code ~= 0 then
+		log('W', 'MPDecalsGE', "Livery baked with status " .. tostring(result.status.code))
+	end
+	return true
+end
+
+-- vehicles on the dynamic textures skin without a projection of their own show this, a plain fill of their paint
+local function getPaint(veh, gameVehicleID)
+	if not paint then
+		local projection = DecalProjection("", Point2I(16, 8), 1, 0)
+		paint = { projection = projection, textureSet = projection:getTextureSet() }
+		if not bakeOnto(projection, veh, gameVehicleID, PAINT_LAYERS) then
+			paint = nil
+			return
+		end
+		for _ = 1, SETTLE_FRAMES do projectAndCombine(projection, paint.textureSet, veh) end
+	end
+	return paint
+end
+
+local function showPaint(gameVehicleID)
+	local veh = getObjectByID(gameVehicleID)
+	local p = veh and getPaint(veh, gameVehicleID)
+	if p then veh:setTextureSet("@DynamicTexture", p.textureSet) end
+end
+
+local function acquireSlot(gameVehicleID)
+	for _, slot in ipairs(pool) do
+		if not slot.owner then
+			slot.owner = gameVehicleID
+			return slot
+		end
+	end
+	if #pool < MAX_LIVERIES then
+		local projection = DecalProjection("", textureSize(), 1, 0)
+		local slot = { projection = projection, textureSet = projection:getTextureSet(), owner = gameVehicleID }
+		table.insert(pool, slot)
+		return slot
+	end
+end
+
+local function releaseSlot(livery)
+	if livery and livery.slot then
+		livery.slot.owner = nil
+		livery.slot = nil
+	end
+	if livery then livery.settle = 0 end
+end
+
+local function queueBake(gameVehicleID)
+	for _, id in ipairs(bakeQueue) do
+		if id == gameVehicleID then return end
+	end
+	table.insert(bakeQueue, gameVehicleID)
+end
+
 
 -- ============= SENDING =============
 
@@ -172,27 +253,14 @@ local function prepareConfig(vehicleName, vehicleConfig, dcl)
 	return true
 end
 
-local function queueBake(gameVehicleID)
-	for _, id in ipairs(bakeQueue) do
-		if id == gameVehicleID then return end
-	end
-	table.insert(bakeQueue, gameVehicleID)
-end
-
---- Removes a remote vehicle's livery and frees its textures.
+--- Removes a remote vehicle's livery, its projection goes back to the pool.
 -- @tparam number gameVehicleID
 local function removeLivery(gameVehicleID)
 	local livery = liveries[gameVehicleID]
 	liveries[gameVehicleID] = nil
-	if livery and livery.projection then
-		-- a slot is free, the next livery that was waiting for one gets baked
-		for id, other in pairs(liveries) do
-			if other.waiting then
-				other.waiting = false
-				queueBake(id)
-				break
-			end
-		end
+	if livery and livery.slot then
+		releaseSlot(livery)
+		priorityTimer = PRIORITY_INTERVAL -- give the free projection to the next nearest vehicle straight away
 	end
 end
 
@@ -221,63 +289,84 @@ local function bake(gameVehicleID)
 	local livery = liveries[gameVehicleID]
 	local veh = getObjectByID(gameVehicleID)
 	if not livery or not veh then return end
-
-	if not livery.projection then
-		if liveryCount() >= MAX_LIVERIES then
-			livery.waiting = true
-			return
-		end
-		livery.projection = DecalProjection("", TEXTURE_SIZE, 1, 0)
-		livery.textureSet = livery.projection:getTextureSet()
-	end
-
-	local projection = livery.projection
-	local jbeam = veh:getJBeamFilename()
-	placeProjection(projection, veh)
-	if not setMaterials(projection, gameVehicleID, jbeam) then
-		log('W', 'MPDecalsGE', "No livery material found on " .. jbeam .. ", the livery isn't shown")
-		removeLivery(gameVehicleID)
+	if not isEnabled() then
+		showPaint(gameVehicleID)
 		return
 	end
 
-	local layers = deserializeLayers(withoutMissingFiles(deepcopy(livery.dcl.layers)))
-	if not layers then return end
-
-	projection:clearBakedTextures()
-	local result = projection:bakeLayers(layers, jbeam)
-	if result and result.status and result.status.code ~= 0 then
-		log('W', 'MPDecalsGE', "Livery '" .. tostring(livery.dcl.name) .. "' baked with status " .. tostring(result.status.code))
+	livery.slot = livery.slot or acquireSlot(gameVehicleID)
+	if not livery.slot then -- all projections are in use by nearer vehicles
+		showPaint(gameVehicleID)
+		return
 	end
-	veh:setTextureSet("@DynamicTexture", livery.textureSet)
+
+	local slot = livery.slot
+	if not bakeOnto(slot.projection, veh, gameVehicleID, withoutMissingFiles(deepcopy(livery.dcl.layers))) then
+		releaseSlot(livery)
+		showPaint(gameVehicleID)
+		return
+	end
+	veh:setTextureSet("@DynamicTexture", slot.textureSet)
 	livery.settle = SETTLE_FRAMES
 end
 
--- after a bake the textures need projecting and combining for a few frames, after that they stay
-local function settle(gameVehicleID, livery)
-	local veh = getObjectByID(gameVehicleID)
-	if not veh then
-		livery.settle = 0
-		return
+-- the nearest vehicles get the projections, a vehicle further away than all of them gives its one up
+local function updatePriority()
+	if not isEnabled() then return end
+	local camPos = core_camera.getPosition()
+	local list = {}
+	for gameVehicleID in pairs(liveries) do
+		local veh = getObjectByID(gameVehicleID)
+		if veh then table.insert(list, { id = gameVehicleID, dist = camPos:squaredDistance(veh:getPosition()) }) end
 	end
-	local projection = livery.projection
-	veh:setTextureSet("@DynamicTexture", livery.textureSet)
-	placeProjection(projection, veh)
-	projection:projectDynamicDecals(veh:getRefNodeMatrix():fullInverse():mul(getCameraTransform()), getCameraProjMatrix())
-	projection:combineTextures(livery.textureSet)
-	livery.settle = livery.settle - 1
+	table.sort(list, function(a, b) return a.dist < b.dist end)
+
+	for i, entry in ipairs(list) do
+		local livery = liveries[entry.id]
+		if i > MAX_LIVERIES and livery.slot then
+			releaseSlot(livery)
+			showPaint(entry.id)
+		end
+	end
+	for i = 1, math.min(#list, MAX_LIVERIES) do
+		if not liveries[list[i].id].slot then queueBake(list[i].id) end
+	end
 end
 
 
 -- ============= EVENTS =============
 
-local function onUpdate()
+local function onUpdate(dtReal)
+	priorityTimer = priorityTimer + dtReal
+	if priorityTimer >= PRIORITY_INTERVAL then
+		priorityTimer = 0
+		updatePriority()
+	end
+
 	local id = table.remove(bakeQueue, 1)
 	if id then bake(id) end
 
 	for gameVehicleID, livery in pairs(liveries) do
-		if livery.projection and livery.settle and livery.settle > 0 then
-			settle(gameVehicleID, livery)
+		if livery.slot and livery.settle and livery.settle > 0 then
+			local veh = getObjectByID(gameVehicleID)
+			if veh then
+				veh:setTextureSet("@DynamicTexture", livery.slot.textureSet)
+				projectAndCombine(livery.slot.projection, livery.slot.textureSet, veh)
+			end
+			livery.settle = veh and livery.settle - 1 or 0
 		end
+	end
+end
+
+-- turned off they show their paint, the liveries are kept so turning it back on shows them again
+local function onSettingsChanged()
+	if not isEnabled() then
+		for gameVehicleID, livery in pairs(liveries) do
+			releaseSlot(livery)
+			showPaint(gameVehicleID)
+		end
+	else
+		priorityTimer = PRIORITY_INTERVAL
 	end
 end
 
@@ -285,7 +374,9 @@ local function onVehicleDestroyed(gameVehicleID)
 	removeLivery(gameVehicleID)
 end
 
+-- the pool is kept, the projections don't give their memory back when they're freed
 local function onBeamMPServerLeave()
+	for _, livery in pairs(liveries) do releaseSlot(livery) end
 	liveries, bakeQueue = {}, {}
 end
 
@@ -297,6 +388,7 @@ M.removeLivery    = removeLivery
 M.onVehicleReady  = onVehicleReady
 
 M.onUpdate            = onUpdate
+M.onSettingsChanged   = onSettingsChanged
 M.onVehicleDestroyed  = onVehicleDestroyed
 M.onBeamMPServerLeave = onBeamMPServerLeave
 M.onInit = function() setExtensionUnloadMode(M, "manual") end
