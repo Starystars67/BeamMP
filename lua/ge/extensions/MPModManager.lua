@@ -46,6 +46,31 @@ local function isModWhitelisted(modName)
 	return false
 end
 
+--- Check if a mod is a livery from the game's livery editor. They're exported as small unpacked mods with just a
+--- paint design part, its materials and textures, and are kept on like BeamMP's own mods so you keep your livery on
+--- servers (MPDecalsGE sends it to the other players).
+-- @param mod table The mod in question to check
+-- @return boolean
+local function isLiverySkin(mod)
+	local dir = mod.unpackedPath or (mod.dirname == "/mods/unpacked/" and "/mods/unpacked/" .. mod.modname .. "/")
+	if not dir then return false end
+	local skin = string.lower(mod.modname)
+	local hasPart = false
+	for _, file in ipairs(FS:findFiles(dir, "*", -1, false, false)) do
+		local model, folder, name = string.lower(file:sub(#dir + 1)):match("^vehicles/([^/]+)/([^/]+)/([^/]+)$")
+		if not model or folder ~= skin then return false end -- anything outside vehicles/<model>/<skin>/ isn't a livery
+		if name:find("%.jbeam$") then
+			local data = jsonReadFile(file)
+			local part = type(data) == "table" and data[model .. "_skin_" .. skin]
+			if type(part) ~= "table" or part.slotType ~= "paint_design" or type(part.information) ~= "table" or part.information.authors ~= "Dynamic Decals" then return false end
+			hasPart = true
+		elseif not name:find("%.png$") and not name:find("%.materials%.json$") then
+			return false
+		end
+	end
+	return hasPart
+end
+
 --- Check if a mod is allowed (Calls isModAllowed and isModWhitelist)
 -- If it is now allowed we disable it, if it is in the multiplayer folder we also delete it as this is maintained by BeamMP
 -- @param mod table The mod in question to check
@@ -57,6 +82,7 @@ local function checkMod(mod) --TODO: might have a flaw with repo mods as their n
 	local modWhitelisted = isModWhitelisted(modname)
 
 	if modWhitelisted then return end -- don't do anything with whitelisted mods
+	if not modAllowed and isLiverySkin(mod) then return end -- liveries stay on like BeamMP's own mods
 
 	if not modAllowed and mod.active then
 		log('W', 'checkMod', "This mod should not be running: "..modname)
