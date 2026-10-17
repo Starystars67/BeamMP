@@ -7,8 +7,7 @@ local M = {}
 v.mpVehicleType = "L" -- we assume vehicles are local (they're set to remove once we receive pos data from the server)
 v.mpServerID = ""
 
-local keyStates = {} -- table of keys and their states, used as a reference
-local keysToPoll = {} -- list of keys we want to poll for state changes
+local keyStates = {} -- table of keys and their states, sent by GE
 local keypressTriggers = {}
 
 
@@ -25,18 +24,14 @@ function onKeyReleased(keyname, f)
 	addKeyEventListener(keyname, f, 'up')
 end
 
+-- input.keys is gone in 0.39, the key is a keybind in GE now (MPKeybindsGE) and GE sends us its state
 function addKeyEventListener(keyname, f, t)
-	if type(keyname) == "table" then -- multiple keys were requested, this probably came from GE
-		for _,v in pairs(keyname) do
-			keysToPoll[v] = true
-		end
-	else
-		f = f or function() end
-		log('W','AddKeyEventListener', "Adding a key event listener for key '"..keyname.."'")
-	
-		table.insert(keypressTriggers, {key = keyname, func = f, type = t or 'both'})
-		keysToPoll[keyname] = true
-	end
+	if type(keyname) ~= "string" then return end
+	keyname = keyname:lower()
+	f = f or function() end
+	log('W','AddKeyEventListener', "Adding a key event listener for key '"..keyname.."'")
+	table.insert(keypressTriggers, {key = keyname, func = f, type = t or 'both'})
+	obj:queueGameEngineLua("if MPKeybindsGE then MPKeybindsGE.addVehicleKeyListener(" .. string.format("%q", keyname) .. ") end")
 end
 
 local function onKeyStateChanged(key, state)
@@ -46,16 +41,58 @@ local function onKeyStateChanged(key, state)
 			keypressTriggers[i].func(state)
 		end
 	end
-	obj:queueGameEngineLua("MPGameNetwork.onKeyStateChanged('"..key.."',"..tostring(state)..")")
 end
 
 function getKeyState(key)
-	return keyStates[key] or false
+	return keyStates[type(key) == "string" and key:lower() or key] or false
 end
 
 
+local remoteDisabled = false
+local remoteEngines = {} -- combustion engines, a reset puts their failure limits back
+
+-- the engine's random over-rev / over-torque failures, the owner's gear can arrive a moment late and lock up our copy
+-- of their engine while theirs is fine
+local function disableEngineFailures()
+	for _, engine in ipairs(remoteEngines) do
+		if engine.maxPhysicalAV ~= math.huge then
+			engine.maxPhysicalAV = math.huge
+			engine.maxTorqueRating = 0
+		end
+	end
+end
+
+-- things the game does for every vehicle that only make sense for your own, turned off on other players' vehicles
+local function disableForRemote()
+	if remoteDisabled then return end
+	remoteDisabled = true
+
+	-- the burnout and odometer stats only check that the AI is off, not that you're in the vehicle, so other players'
+	-- burnouts and distance were added to your own stats. The odometer still counts, part wear uses it
+	local stats = extensions.gameplayStatistic
+	if stats then
+		stats.metricAdd = nop
+		stats.metricSet = nop
+		stats.updateGFX = nil
+		extensions.hookUpdate("updateGFX")
+	end
+	-- recovery points, you can't recover another player's vehicle and their resets come from the server
+	recovery.updateGFX = nop
+
+	-- UI messages, the stalled engine one has no check for who's in the vehicle and is sent every frame while it's stalled
+	local trigger = guihooks.trigger
+	guihooks.trigger = function(hookName, ...)
+		if hookName == "Message" then return end
+		return trigger(hookName, ...)
+	end
+
+	remoteEngines = powertrain.getDevicesByType("combustionEngine")
+	disableEngineFailures()
+end
+
 local function setVehicleType(x)
   v.mpVehicleType = x
+  if x == 'R' then disableForRemote() end
 end
 
 local function setServerID(id)
@@ -63,26 +100,18 @@ local function setServerID(id)
 end
 
 local function updateGFX(dtReal)
+	if remoteDisabled then disableEngineFailures() end
 	if v.mpVehicleType == 'R' and hydros.enableFFB then -- disable ffb if it got enabled by a reset
 		-- trigger a check that will set FFBID to -1
 		hydros.enableFFB = false
 		hydros.onFFBConfigChanged()
 	end
-
-	for k in pairs(keysToPoll) do
-		if input.keys[k] ~= keyStates[k] then
-			onKeyStateChanged(k, input.keys[k])
-		end
-	end
 end
-
---M.onExtensionLoaded = function() addKeyEventListener('E') addKeyEventListener('G') end
 
 local function onExtensionLoaded()
 	obj:queueGameEngineLua("MPVehicleGE.onVehicleReady("..obj:getID()..")")
 end
 
-setmetatable(input.keys, {}) -- disable deprecated warning
 detectGlobalWrites() -- reenable global write notifications
 
 M.updateGFX = updateGFX
@@ -90,6 +119,7 @@ M.onExtensionLoaded    = onExtensionLoaded
 
 M.setVehicleType       = setVehicleType
 M.setServerID          = setServerID
+M.onKeyStateChanged    = onKeyStateChanged
 
 --M.getKeyState = getKeyState
 --M.addKeyEventListener = addKeyEventListener
