@@ -13,12 +13,25 @@ local M = {}
 local imgui = ui_imgui
 local players = {} -- contains name and ping for each entry
 
+-- ping colors, green / amber / red
+local pingGood = imgui.ImVec4(0.44, 0.81, 0.49, 1)
+local pingOk = imgui.ImVec4(0.94, 0.66, 0.25, 1)
+local pingBad = imgui.ImVec4(0.94, 0.37, 0.37, 1)
+
+local function pingColor(ping)
+    local ms = tonumber(ping)
+    if not ms then return nil end
+    if ms < 100 then return pingGood end
+    if ms < 250 then return pingOk end
+    return pingBad
+end
+
 --- Updates the player list based on the provided JSON data.
 --- @param jsonData table The JSON data containing player information.
 local function updatePlayerList(jsonData)
     local playerList = {}
     for k, v in pairs(jsonData) do
-        table.insert(playerList, {name = k, ping = tostring(v)})
+        table.insert(playerList, {name = k, ping = tostring(v), pingColor = pingColor(v)})
     end
     table.sort(playerList, function(a, b)
         return a.name < b.name
@@ -45,7 +58,7 @@ local function render()
             imgui.Text(player.name)
             imgui.SameLine()
             imgui.SetCursorPosX((imgui.GetWindowWidth() - imgui.CalcTextSize(ffi.string(player.ping)).x - hw / 2))
-            imgui.Text(player.ping)
+            if player.pingColor then imgui.TextColored(player.pingColor, player.ping) else imgui.Text(player.ping) end
         end
     end
     imgui.EndChild()

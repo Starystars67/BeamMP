@@ -67,6 +67,8 @@ end
 
 -- debug drawers, using the FFI functions for debugDraw is a lot faster and produces no garbage
 local drawTextAdvanced = ffiFound and ffi.C.BNG_DBG_DRAW_TextAdvanced or nop
+local typingSuffix = "typing... " -- added to the nametag while that player is typing in chat
+local awaySuffix = "away " -- same while their game is out of focus
 local drawSphere = ffiFound and ffi.C.BNG_DBG_DRAW_Sphere or nop
 
 --- Contains Information about Backend authorized Roles
@@ -1169,6 +1171,9 @@ function Vehicle:updateNameTagCache()
 		suffix = suffix..tag.." "
 	end
 	self.nameTag = String(" " .. table.concat({prefix, name, suffix, tag}) .. " ")
+	-- the name and role on their own, for places that show the role separately (big map, modern nametags)
+	self.nameTagName = (table.concat({prefix, name, suffix}):gsub("%s+$", ""))
+	self.nameTagRole = (tag:gsub("^%s*%[", ""):gsub("%]%s*$", ""))
 end
 function Vehicle:updateSpectatorsTagCache()
 	local owner = self:getOwner()
@@ -2762,9 +2767,10 @@ local function onPreRender(dt)
 					end
 				end
 				-- draw main nametag
+				local statusSuffix = MPPlayerStatusGE and ((MPPlayerStatusGE.isTyping(v.ownerID) and typingSuffix) or (MPPlayerStatusGE.isAway(v.ownerID) and awaySuffix))
 				drawTextAdvanced(
 					pos.x, pos.y, pos.z, -- Location
-					v.nameTag .. dist, -- Text
+					statusSuffix and (v.nameTag .. dist .. statusSuffix) or (v.nameTag .. dist), -- Text
 					color(255, 255, 255, nametagAlpha*254), -- Foreground Color, Alpha is multiplied by 254 because using 255 seems to break backround alpha in 0.37
 					true, -- Draw background 
 					false, -- Wtf

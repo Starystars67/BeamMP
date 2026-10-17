@@ -141,3 +141,42 @@ ul#chat-list {
     transform: scale(1.15);
     background: rgba(255, 140, 0, 0.3);
 }
+
+/* someone mentioned us */
+.chat-message.chat-message-mention {
+    border-left-color: #f0a940;
+    background: rgba(240, 169, 64, 0.22);
+}
+
+/* from a player we muted, click to read it */
+.chat-hidden-text {
+    font-style: italic;
+    opacity: 0.6;
+    cursor: pointer;
+}
+
+.chat-hidden-text:hover {
+    opacity: 0.9;
+    text-decoration: underline;
+}
+
+.chat-shown-text {
+    cursor: pointer;
+}
+
+/* new messages while we weren't looking */
+.chat-unread {
+    align-self: center;
+    margin: 0 0.3rem;
+    padding: 0.1rem 0.45rem;
+    border-radius: 1rem;
+    background: var(--bng-cool-gray-600, #4a5063);
+    color: var(--bng-off-white, #fff);
+    font-size: 0.8em;
+    white-space: nowrap;
+}
+
+.chat-unread.chat-unread-mention {
+    background: #f0a940;
+    color: #1b1f2a;
+}

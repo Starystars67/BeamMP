@@ -11,15 +11,18 @@
           v-for="message in messages"
           :key="message.key"
           class="chat-message"
+          :class="{ 'chat-message-mention': message.mention }"
           :style="messageStyle(message)"
         >
           <span class="chat-message-timestamp">{{ message.time }}</span>
-          <span v-if="message.html" class="chat-message-content" v-html="message.html"></span>
+          <span v-if="message.hidden" class="chat-message-content">{{ message.hiddenFrom }}<span class="chat-hidden-text" @click="message.hidden = false">hidden message, click to show</span></span>
+          <span v-else-if="message.html" class="chat-message-content" v-html="message.html"></span>
+          <span v-else-if="message.muted" class="chat-message-content chat-shown-text" title="Click to hide" @click="message.hidden = true">{{ message.text }}</span>
           <span v-else class="chat-message-content">{{ message.text }}</span>
         </li>
       </ul>
 
-      <form ref="chatBoxRef" class="chatbox" :style="chatBoxStyle" @submit.prevent="sendChat">
+      <form ref="chatBoxRef" class="chatbox" :style="chatBoxStyle" @submit.prevent="sendChat" @focusin="chatHasFocus = true" @focusout="chatHasFocus = false">
         <button
           class="buttons send-button"
 		  id="send-button"
@@ -29,6 +32,7 @@
         >
           {{ sendButtonText }}
         </button>
+		<span v-if="unreadCount > 0" class="chat-unread" :class="{ 'chat-unread-mention': unreadMentions > 0 }" title="New messages">{{ unreadCount }}{{ unreadMentions > 0 ? " · @" + unreadMentions : "" }}</span>
 		<BngInput
             v-model="inputText"
             class="chat-input"
@@ -62,7 +66,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, onUnmounted, ref } from "vue"
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue"
 import { useBridge } from "@/bridge"
 import { BngDropdown, BngInput, ACCENTS } from "@/common/components/base"
 
@@ -81,6 +85,28 @@ const enableNewChatMenu = ref(false)
 const useUiAppRedesign = ref(false)
 const isHovered = ref(false)
 const isFocused = ref(false)
+const chatHasFocus = ref(false)
+const unreadCount = ref(0)
+const unreadMentions = ref(0)
+
+// looking at the chat clears the unread badge
+watch([isHovered, chatHasFocus], ([hovered, focused]) => {
+  if (hovered || focused) {
+    unreadCount.value = 0
+    unreadMentions.value = 0
+  }
+})
+
+// typing indicator above our nametag for everyone else, sent to GE when it changes and every 2s while still
+// typing, so GE can clear it if we never say we stopped
+const isTyping = computed(() => chatHasFocus.value && inputText.value.trim() !== "")
+let lastTypingSent = 0
+watch([isTyping, inputText], ([typing], [wasTyping]) => {
+  const now = Date.now()
+  if (typing === wasTyping && !(typing && now - lastTypingSent > 2000)) return
+  lastTypingSent = now
+  api.engineLua(`if MPPlayerStatusGE then MPPlayerStatusGE.setTyping(${typing}) end`)
+})
 const chatHorizontal = ref(localStorage.getItem("chatHorizontal") || "middle")
 const chatVertical = ref(localStorage.getItem("chatVertical") || "bottom")
 const nowTick = ref(Date.now())
@@ -192,6 +218,8 @@ function storeChatMessages() {
     JSON.stringify(messages.value.slice(-70).map((message) => ({
       message: message.raw,
       time: message.time,
+      mention: message.mention,
+      muted: message.muted,
     })))
   )
 }
@@ -203,15 +231,16 @@ function loadStoredMessages() {
   try {
     const parsed = JSON.parse(storedMessages)
     if (!Array.isArray(parsed)) return
-    messages.value = parsed.slice(-70).map((entry, index) => createMessage(entry.message, entry.time, `stored-${index}`))
+    messages.value = parsed.slice(-70).map((entry, index) => createMessage(entry.message, entry.time, `stored-${index}`, entry.mention, entry.muted))
   } catch {
     messages.value = []
   }
 }
 
-function createMessage(message, time, key) {
+function createMessage(message, time, key, mention = false, muted = false) {
   const raw = String(message ?? "")
   const formatted = raw.startsWith("Server: ") ? formatChatMessage(raw) : ""
+  const sep = raw.indexOf(": ")
   return {
     key,
     raw,
@@ -219,6 +248,10 @@ function createMessage(message, time, key) {
     html: formatted,
     time,
     createdAt: Date.now(),
+    mention: Boolean(mention), // someone mentioned us
+    muted: Boolean(muted),
+    hidden: Boolean(muted), // from a player we muted, shown as hidden until it's clicked
+    hiddenFrom: sep >= 0 ? raw.substring(0, sep + 2) : "",
   }
 }
 
@@ -310,8 +343,8 @@ function onInputKeydown(event) {
   }
 }
 
-function addMessage(message, time = currentTimeString(), messageId = null) {
-  const entry = createMessage(message, time, messageId ?? `local-${Date.now()}-${messages.value.length}`)
+function addMessage(message, time = currentTimeString(), messageId = null, mention = false, muted = false) {
+  const entry = createMessage(message, time, messageId ?? `local-${Date.now()}-${messages.value.length}`, mention, muted)
   messages.value = [...messages.value, entry].slice(-70)
   storeChatMessages()
   scrollToLastMessage()
@@ -321,7 +354,13 @@ function onBeamMPChatMessage(payload) {
   if (!payload || payload.id <= lastMessageId.value) return
   lastMessageId.value = payload.id
   const time = currentTimeString()
-  addMessage(payload.message, time, `remote-${payload.id}`)
+  addMessage(payload.message, time, `remote-${payload.id}`, payload.mention, payload.muted)
+
+  // unread badge, for messages that come in while we're not looking at the chat
+  if (!isHovered.value && !chatHasFocus.value) {
+    unreadCount.value++
+    if (payload.mention) unreadMentions.value++
+  }
 }
 
 function onClearHistory() {
@@ -369,6 +408,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  if (isTyping.value) api.engineLua("if MPPlayerStatusGE then MPPlayerStatusGE.setTyping(false) end") // closed mid message
   events.off("onBeamMPChatMessage", onBeamMPChatMessage)
   events.off("onBeamMPClearChatHistory", onClearHistory)
   events.off("SettingsChanged", onSettingsChanged)
@@ -613,5 +653,44 @@ onUnmounted(() => {
     content: "↗";
     font-size: 1rem;
   }
+}
+
+/* someone mentioned us */
+.beammpChat2 .chat-message.chat-message-mention {
+  border-left-color: #f0a940;
+  background: rgba(240, 169, 64, 0.22);
+}
+
+/* from a player we muted, click to read it */
+.beammpChat2 .chat-hidden-text {
+  font-style: italic;
+  opacity: 0.6;
+  cursor: pointer;
+}
+
+.beammpChat2 .chat-hidden-text:hover {
+  opacity: 0.9;
+  text-decoration: underline;
+}
+
+.beammpChat2 .chat-shown-text {
+  cursor: pointer;
+}
+
+/* new messages while we weren't looking */
+.beammpChat2 .chat-unread {
+  align-self: center;
+  margin: 0 0.3rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 1rem;
+  background: var(--bng-cool-gray-600, #4a5063);
+  color: var(--bng-off-white, #fff);
+  font-size: 0.8em;
+  white-space: nowrap;
+}
+
+.beammpChat2 .chat-unread.chat-unread-mention {
+  background: #f0a940;
+  color: #1b1f2a;
 }
 </style>

@@ -10,7 +10,8 @@
 
 local M = {
     chatMessages = {},
-    newMessageCount = 0
+    newMessageCount = 0,
+    newMentionCount = 0
 }
 
 local utils = require("beammp.ui.utils")
@@ -18,6 +19,8 @@ local ffi = require('ffi')
 
 local imgui = ui_imgui
 local heightOffset = 20
+local mentionColor = imgui.ImVec4(0.94, 0.66, 0.25, 1) -- @ in front of messages that mention us
+local hiddenColor = imgui.ImVec4(0.6, 0.63, 0.7, 1) -- "hidden message" for muted players
 local forceBottom = false
 local scrollToBottom = false
 local chatMessageBuf = imgui.ArrayChar(256)
@@ -241,7 +244,7 @@ end
 --- @param message string The message content.
 --- @param id number The ID of the message.
 --- @param color string The color of the message.
-local function addMessage(username, message, id, color)
+local function addMessage(username, message, id, color, mention, muted)
     if(username == "Server") then
         message = formatTextWithColor(message, false)
     else
@@ -254,8 +257,11 @@ local function addMessage(username, message, id, color)
         message = message,
         sentTime = os.time(),
         id = #M.chatMessages + 1,
-        currentWidth = imgui.CalcTextSize(username .. ": ").x,
-        currentHeight = imgui.CalcTextSize(username .. ": ").y
+        currentWidth = imgui.CalcTextSize((mention and "@ " or "") .. username .. ": ").x,
+        currentHeight = imgui.CalcTextSize(username .. ": ").y,
+        mention = mention, -- someone mentioned us, gets an @ marker
+        muted = muted,
+        hidden = muted -- from a player we muted, shown as hidden until it's clicked
     }
     if messageTable.color then
         messageTable.color = imgui.ImVec4(messageTable.color[0]/255, messageTable.color[1]/255, messageTable.color[2]/255, (messageTable.color[3] or 127)/255)
@@ -269,6 +275,7 @@ local function addMessage(username, message, id, color)
 
     if not forceBottom and username ~= MPConfig:getNickname() then
         M.newMessageCount = M.newMessageCount + 1
+        if mention then M.newMentionCount = M.newMentionCount + 1 end
     end
 end
 
@@ -311,6 +318,7 @@ local function render()
 
         if scrollbarPos >= imgui.GetScrollMaxY() then
             M.newMessageCount = 0
+            M.newMentionCount = 0
             wasMessageSent = false
             forceBottom = true
         else
@@ -331,6 +339,10 @@ local function render()
 
             columnWidth = columnWidth - 10
             
+            if message.mention then
+                imgui.TextColored(mentionColor, "@")
+                imgui.SameLine()
+            end
             if message.color then
                     imgui.TextColored(message.color, message.username)
                 imgui.SameLine()
@@ -341,14 +353,20 @@ local function render()
       
             local currentWidth = message.currentWidth
 
-            for _, v in ipairs(message.message) do
-                if (currentWidth + v.width <= columnWidth) then
-                    imgui.SameLine(currentWidth)
-                else
-                    currentWidth = 0
+            if message.hidden then
+                imgui.TextColored(hiddenColor, "hidden message, click to show")
+                if imgui.IsItemClicked() then message.hidden = false end
+            else
+                for _, v in ipairs(message.message) do
+                    if (currentWidth + v.width <= columnWidth) then
+                        imgui.SameLine(currentWidth)
+                    else
+                        currentWidth = 0
+                    end
+                    currentWidth = currentWidth + v.width
+                    imgui.TextColored(v.color, v.text)
+                    if message.muted and imgui.IsItemClicked() then message.hidden = true end -- click again to hide it
                 end
-                currentWidth = currentWidth + v.width
-                imgui.TextColored(v.color, v.text)
             end
 
             if scrollToBottom or forceBottom then
@@ -390,6 +408,8 @@ local function render()
                 imgui.SetKeyboardFocusHere(1)
             end
         end
+        -- typing = the input is focused and has something in it (MPPlayerStatusGE only sends when it changes)
+        if MPPlayerStatusGE then MPPlayerStatusGE.setTypingImgui(imgui.IsItemActive() and chatMessageBuf[0] ~= 0) end
 
         imgui.SameLine()
         if utils.imageButton(UI.uiIcons.send.texId, 20) then
