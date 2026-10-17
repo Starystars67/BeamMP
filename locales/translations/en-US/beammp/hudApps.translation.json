@@ -16,5 +16,8 @@
     "ui.apps.beammp.playerlist.away": "Away",
     "ui.apps.beammp.playerlist.lagging": "Lagging",
     "ui.apps.beammp.playerlist.muted": "Muted",
-    "ui.apps.beammp.playerlist.navigating": "Navigating to"
+    "ui.apps.beammp.playerlist.navigating": "Navigating to",
+    "ui.apps.beammp.playerlist.block": "Block",
+    "ui.apps.beammp.playerlist.unblock": "Unblock",
+    "ui.apps.beammp.playerlist.blocked": "Blocked"
 }
