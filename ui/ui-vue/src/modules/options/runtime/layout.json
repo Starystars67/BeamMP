@@ -4641,6 +4641,56 @@
             "tooltip",
             "setting"
           ]
+        },
+        {
+          "version": "0.39",
+          "label": "ui.options.beammp.showLiveries",
+          "tooltip": "ui.options.beammp.showLiveries.tooltip",
+          "setting": "showLiveries",
+          "interactive": true,
+          "condition_always_off": false,
+          "condition_not_shipping": false,
+          "condition_simplemenu": "",
+          "condition_visible": "",
+          "condition_enabled": "",
+          "itemType": "checkbox",
+          "component": "OptionsCheckbox",
+          "separateLabel": true,
+          "lua": "",
+          "luaOff": "",
+          "valueOn": true,
+          "valueOff": false,
+          "search": [
+            "label",
+            "caption",
+            "tooltip",
+            "setting"
+          ]
+        },
+        {
+          "version": "0.39",
+          "label": "ui.options.beammp.highQualityLiveries",
+          "tooltip": "ui.options.beammp.highQualityLiveries.tooltip",
+          "setting": "highQualityLiveries",
+          "interactive": true,
+          "condition_always_off": false,
+          "condition_not_shipping": false,
+          "condition_simplemenu": "",
+          "condition_visible": "",
+          "condition_enabled": "",
+          "itemType": "checkbox",
+          "component": "OptionsCheckbox",
+          "separateLabel": true,
+          "lua": "",
+          "luaOff": "",
+          "valueOn": true,
+          "valueOff": false,
+          "search": [
+            "label",
+            "caption",
+            "tooltip",
+            "setting"
+          ]
         }
       ],
       "reroute": "",

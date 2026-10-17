@@ -23,6 +23,8 @@
   "showBlobDeleted"             : [ "cloud", true ],
   "autoSyncVehicles"            : [ "local", true ],
   "simplifyRemoteVehicles"      : [ "local" ],
+  "showLiveries"                : [ "cloud", true ],
+  "highQualityLiveries"         : [ "local", false ],
   "showSpectators"              : [ "cloud", true ],
   "showDebugOutput"             : [ "local" ],
   "enableNewChatMenu"           : [ "cloud", false ],

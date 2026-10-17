@@ -1278,6 +1278,8 @@ local function sendVehicleSpawn(gameVehicleID)
 		-- License plate names doesn't allways exist in the vehicle config, so we need to add it manually
 		vehicleTable.vcf.licenseName = veh:getDynDataFieldbyName("licenseText", 0)
 
+		vehicleTable.dcl = MPDecalsGE.getOwnLivery(gameVehicleID) -- Livery from the livery editor, nil if there isn't one
+
 		local stringToSend = jsonEncode(vehicleTable) -- Encode table to send it as json string
 		MPGameNetwork.send(MPNetworkHelpers.generatePacketBuffer('Os',0,stringToSend)) -- Send table that contain all vehicle informations for each vehicle
 		log('I', "sendVehicle", "Vehicle "..gameVehicleID.." was sent")
@@ -1322,6 +1324,8 @@ local function sendVehicleEdit(gameVehicleID)
 
 	-- License plate names doesn't allways exist in the vehicle config, so we need to add it manually
 	vehicleTable.vcf.licenseName = veh:getDynDataFieldbyName("licenseText", 0)
+
+	vehicleTable.dcl = MPDecalsGE.getOwnLivery(gameVehicleID) -- Livery from the livery editor, nil if there isn't one
 
 	local stringToSend = jsonEncode(vehicleTable) -- Encode table to send it as json string
 	MPGameNetwork.send(MPNetworkHelpers.generatePacketBuffer('Oc',getServerVehicleID(gameVehicleID),stringToSend)) -- Send table that contain all vehicle informations for each vehicle
@@ -1518,6 +1522,8 @@ local function applyVehSpawn(event)
 		vehicleName, vehicleConfig = simplifyVehicle(vehicleName, vehicleConfig)
 	end
 
+	local showLivery = MPDecalsGE.prepareConfig(vehicleName, vehicleConfig, decodedData.dcl)
+
 	local spawnedVehID = getGameVehicleID(event.serverVehicleID)
 	local spawnedVeh = spawnedVehID and getObjectByID(spawnedVehID) or nil
 
@@ -1557,6 +1563,8 @@ local function applyVehSpawn(event)
 
 	spawnedVeh:queueLuaCommand("hydros.onFFBConfigChanged(nil)")
 	spawnedVeh:queueLuaCommand("MPPowertrainVE.setIgnitionState("..ignitionLevel..")")
+
+	MPDecalsGE.setLivery(spawnedVehID, showLivery and decodedData.dcl or nil) -- baked once the vehicle is ready
 end
 
 local function applyVehEdit(serverID, data)
@@ -1582,6 +1590,9 @@ local function applyVehEdit(serverID, data)
 		vehicleName, vehicleConfig = simplifyVehicle(vehicleName, vehicleConfig)
 	end
 
+	local showLivery = MPDecalsGE.prepareConfig(vehicleName, vehicleConfig, decodedData.dcl)
+	local respawned = true -- a respawn bakes the livery when the vehicle is ready again
+
 	if vehicleName == veh:getJBeamFilename() then
 		log('I','applyVehEdit',"Updating vehicle "..gameVehicleID.." config")
 		local playerVehicle = extensions.core_vehicle_manager.getVehicleData(gameVehicleID)
@@ -1602,12 +1613,14 @@ local function applyVehEdit(serverID, data)
 					core_vehicles.setPlateText(data.playerNickname, gameVehicleID)
 				end
 			elseif vehicleConfig.paints then
+				respawned = false
 				log('I','applyVehEdit', "only color changed")
 				for k, v in pairs(vehicleConfig.paints) do
 					extensions.core_vehicle_manager.liveUpdateVehicleColors(gameVehicleID, veh, k, v)
 				end
 			end
 		else
+			respawned = false
 			log('I','applyVehEdit', "received edit matches local copy, ignoring message")
 		end
 	else
@@ -1630,6 +1643,8 @@ local function applyVehEdit(serverID, data)
 	
 	veh:setField("protected", 0, protected or "0")
 	veh:setField("absMode", 0, absMode or "")
+
+	MPDecalsGE.setLivery(gameVehicleID, showLivery and decodedData.dcl or nil, not respawned)
 end
 
 
@@ -2852,6 +2867,8 @@ local function onVehicleReady(gameVehicleID)
 		log('E', 'onVehicleReady', 'Vehicle does not exist!')
 		return
 	end
+
+	MPDecalsGE.onVehicleReady(gameVehicleID)
 
 	if getOwnMap()[gameVehicleID] then
 		commands.setGameCamera()

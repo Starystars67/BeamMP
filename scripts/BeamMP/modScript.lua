@@ -49,6 +49,9 @@ setExtensionUnloadMode("MPGameNetwork", "manual")
 load("MPVehicleGE")
 setExtensionUnloadMode("MPVehicleGE", "manual")
 
+load("MPDecalsGE")
+setExtensionUnloadMode("MPDecalsGE", "manual")
+
 load("MPInputsGE")
 setExtensionUnloadMode("MPInputsGE", "manual")
 
